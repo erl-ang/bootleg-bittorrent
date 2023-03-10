@@ -8,6 +8,9 @@ GENERAL UTILITIES
 BUFFER_SIZE = 4096
 
 def validate_args(args, parser):
+  """
+  Validates the command line arguments.
+  """
   # TODO: other validations - IP address
 
   # Port number should be an integer value in the range 1024-65535. 
@@ -29,6 +32,11 @@ Functionality for FileClient
 
 class FileClient:
   """
+  FileClient listens for UDP messages from the server and TCP messages from other clients
+  simultaneously using multithreading.
+
+  It is assumed that all clients by default know the server information.
+
   Instance variables:
   name: Client name, username for this client in this file-sharing network
   server_ip: Server IP address
@@ -37,12 +45,12 @@ class FileClient:
   client_tcp_port: Port that client listens for TCP connection requests from other clients for file transfers
   """
 
-  def __init__(self, args):
-    self.name = getattr(args, "name")
-    self.server_ip = getattr(args, "server-ip")
-    self.server_port = getattr(args, "server-port")
-    self.client_udp_port = getattr(args, "client-udp-port")
-    self.client_tcp_port = getattr(args, "client-tcp-port")
+  def __init__(self, name, server_ip, server_port, client_udp_port, client_tcp_port):
+    self.name = name
+    self.server_ip = server_ip
+    self.server_port = server_port
+    self.client_udp_port = client_udp_port
+    self.client_tcp_port = client_tcp_port
 
     self.client_socket = self.create_socket()
     self.local_table = {}
@@ -55,13 +63,21 @@ class FileClient:
     """
     Sends a UDP message to the server to register the client.
     """
-    register_message = f"Registering {self.name}"
+    register_message = f"{self.name},{self.client_udp_port},{self.client_tcp_port}"
     self.client_socket.sendto(register_message.encode(),(self.server_ip, self.server_port))
+
     welcome_message, server_address = self.client_socket.recvfrom(BUFFER_SIZE)
     print(welcome_message.decode())
     self.client_socket.close()
     return
   
+  def deregister(self):
+    """
+    Section 2.5
+    """
+    pass
+
+
   def get_client_table(self):
     """
     Sends a UDP message to the server to get the client table.
@@ -86,8 +102,8 @@ class FileServer:
           their status, the files that they're sharing, their IP addresses,
           and port numbers for other clients to connect to
   """
-  def __init__(self, args):
-    self.port = getattr(args, "port")
+  def __init__(self, port):
+    self.port = port
     self.server_socket = self.bind_server(self.port)
     self.table = dict()
     return
@@ -97,6 +113,20 @@ class FileServer:
     """
     return
   
+  def add_client_info(self, name, status, client_ip, client_udp_port, client_tcp_port):
+    """
+    Adds the client information to the registration table with an empty list of files.
+
+    It is assumed that a client will not register again using the same information after it exits via Silent leave.
+    """
+    self.table[name] = {
+      "status": status,
+      "client_ip": client_ip,
+      "client_udp_port": client_udp_port,
+      "client_tcp_port": client_tcp_port,
+      "files": []
+    }
+    return
   def receive_info(self):
     """
     TODO: should also add the info to the registration table
@@ -104,9 +134,23 @@ class FileServer:
     welcome_message = ">>> [Welcome, You are registered.]"
     while True:
       try:
-        # Receive the register message from the client.
+        # Receive the registration request from the client
+        # Format: <name>,<client-udp-port>,<client-tcp-port>
         message, client_address = self.server_socket.recvfrom(BUFFER_SIZE)
+        name, client_udp_port, client_tcp_port = message.decode().split(",")
+
+        # Check if the client is already registered.
+        if name in self.table:
+          welcome_message = f"Client {name} already registered. Registration rejected."
+          self.server_socket.sendto(welcome_message.encode(), client_address)
+          continue
+        
+        # Add the client information to the registration table.
+        self.add_client_info(name, "active", client_address, client_udp_port, client_tcp_port)
         self.server_socket.sendto(welcome_message.encode(), client_address)
+
+        
+        
       
       # Close the server socket upon program termination
       # so it can be reused for future FileServer sessions.
@@ -205,11 +249,16 @@ def main():
 
     # Run FileServer.
     if getattr(args, "server"):
-      file_server = FileServer(args)
+      file_server = FileServer(getattr(args, "port"))
       file_server.receive_info()
-      # TODO: close socket
     else:
-      file_client = FileClient(args)
+      file_client = FileClient(
+        getattr(args, "name"),
+        getattr(args, "server-ip"),
+        getattr(args, "server-port"),
+        getattr(args, "client-udp-port"),
+        getattr(args, "client-tcp-port")
+      )
       file_client.register()
     return
 
