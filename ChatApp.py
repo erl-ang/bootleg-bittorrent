@@ -1,5 +1,6 @@
 import argparse
 from socket import *
+import threading
 
 """
 GENERAL UTILITIES
@@ -27,6 +28,15 @@ Functionality for FileClient
 """
 
 class FileClient:
+  """
+  Instance variables:
+  name: Client name, username for this client in this file-sharing network
+  server_ip: Server IP address
+  server_port: Port that client sends UDP messages to the server
+  client_udp_port: Port that client listens on for communication with the server
+  client_tcp_port: Port that client listens for TCP connection requests from other clients for file transfers
+  """
+
   def __init__(self, args):
     self.name = getattr(args, "name")
     self.server_ip = getattr(args, "server-ip")
@@ -35,23 +45,47 @@ class FileClient:
     self.client_tcp_port = getattr(args, "client-tcp-port")
 
     self.client_socket = self.create_socket()
+    self.local_table = {}
     return
   
   def create_socket(self):
     return socket(AF_INET, SOCK_DGRAM)
   
-  def send_message(self):
-    message = input("Input lowercase sentence:")
-    self.client_socket.sendto(message.encode(),(self.server_ip, self.server_port))
-    modified_message, server_address = self.client_socket.recvfrom(BUFFER_SIZE)
-    print(modified_message.decode())
+  def register(self):
+    """
+    Sends a UDP message to the server to register the client.
+    """
+    register_message = f"Registering {self.name}"
+    self.client_socket.sendto(register_message.encode(),(self.server_ip, self.server_port))
+    welcome_message, server_address = self.client_socket.recvfrom(BUFFER_SIZE)
+    print(welcome_message.decode())
     self.client_socket.close()
     return
+  
+  def get_client_table(self):
+    """
+    Sends a UDP message to the server to get the client table.
+    """
+    # get_table_message = f"Getting client table"
+    # self.client_socket.sendto(message.encode(),(self.server_ip, self.server_port))
+    # modified_message, server_address = self.client_socket.recvfrom(BUFFER_SIZE)
+    # print(modified_message.decode())
+    # self.client_socket.close()
+    return {}
+
 
 """
 Functionality for FileServer
 """
 class FileServer:
+  """
+  Instance variables:
+  port: Port that server listens on for UDP messages from clients
+  server_socket: Socket that server listens on for UDP messages from clients
+  table: Registration table that stores the nick-names of all the clients,
+          their status, the files that they're sharing, their IP addresses,
+          and port numbers for other clients to connect to
+  """
   def __init__(self, args):
     self.port = getattr(args, "port")
     self.server_socket = self.bind_server(self.port)
@@ -67,14 +101,18 @@ class FileServer:
     """
     TODO: should also add the info to the registration table
     """
+    welcome_message = ">>> [Welcome, You are registered.]"
     while True:
       try:
+        # Receive the register message from the client.
         message, client_address = self.server_socket.recvfrom(BUFFER_SIZE)
-        modifiedMessage = message.decode().upper()
-        self.server_socket.sendto(modifiedMessage.encode(), client_address)
+        self.server_socket.sendto(welcome_message.encode(), client_address)
+      
+      # Close the server socket upon program termination
+      # so it can be reused for future FileServer sessions.
       except KeyboardInterrupt:
         self.server_socket.close()
-        print("Server socket closed")
+        print("Server socket closed.")
         break
     return
 
@@ -172,7 +210,7 @@ def main():
       # TODO: close socket
     else:
       file_client = FileClient(args)
-      file_client.send_message()
+      file_client.register()
     return
 
 
