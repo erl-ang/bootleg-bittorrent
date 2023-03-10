@@ -30,7 +30,8 @@ def validate_args(args, parser):
     for port in ports:
         if port < 1024 or port > 65535:  # TODO: inclusive exclusive
             raise parser.error(
-                "Port number should be an integer value in the range 1024-65535")
+                "Port number should be an integer value in the range 1024-65535"
+            )
     return
 
 
@@ -65,18 +66,34 @@ class FileClient:
         self.local_table = {}
         return
 
-    def execute_command(self, command):
-
+    def execute_commands(self):
+        while True:
+            command, args = input(">>> ")
+            if command == "setdir":
+                self.set_dir()
+            elif command == "offer":
+                self.offer_file()
+            elif command == "list":
+                self.list_files()
+            elif command == "get":
+                self.get_file()
+            elif command == "deregister":
+                self.deregister()
+            elif command == "exit":
+                self.deregister()
+                break
+            else:
+                print(">>> [Invalid command. Please try again.]")
         return
 
     def request_file(self, file_name, file_owner):
         """
         Sends a TCP message to the client to request the file.
         """
-        print(f" < Connection with client {file_owner} established. >")
-        print(f" < Downloading {file_name}... >")
-        print(f" < {file_name} downloaded successfully! >")
-        print(f" < Connection with client {file_owner} closed. >")
+        print(f"< Connection with client {file_owner} established. >")
+        print(f"< Downloading {file_name}... >")
+        print(f"< {file_name} downloaded successfully! >")
+        print(f"< Connection with client {file_owner} closed. >")
 
         # TODO: deny file request
         return
@@ -109,10 +126,14 @@ class FileClient:
         self.client_socket.sendto(
             register_message.encode(), (self.server_ip, self.server_port))
 
-        welcome_message, server_address = self.client_socket.recvfrom(
-            BUFFER_SIZE)
+        welcome_message, server_address = self.client_socket.recvfrom(BUFFER_SIZE)
         print(welcome_message.decode())
-        self.client_socket.close()
+        update_message, server_address = self.client_socket.recvfrom(BUFFER_SIZE)
+        print(update_message.decode())
+        table, server_address = self.client_socket.recvfrom(BUFFER_SIZE)
+        
+
+        self.execute_commands()
         return
 
     def deregister(self):
@@ -122,8 +143,9 @@ class FileClient:
         When a client is about to go offline, it immediately stops listening and ignores
         incoming requests on the TCP port for incoming file requests.
         """
+        self.client_socket.close()
 
-        print(" >>> [You are now Offline. Bye.]")
+        print(">>> [You are now Offline. Bye.]")
         pass
 
     def get_client_table(self):
@@ -149,7 +171,7 @@ class FileServer:
     their IP addresses and the files that they are sharing. This information is
     pushed to clients and the client instances use these to communicate directly with
     each other over TCP. 
-    
+
     Instance variables:
     port: Port that server listens on for UDP messages from clients
     server_socket: Socket that server listens on for UDP messages from clients
@@ -228,14 +250,17 @@ class FileServer:
                     name, "active", client_address, client_udp_port, client_tcp_port)
                 update_message = ">>> [Client table updated.]"
                 self.server_socket.sendto(
-                    welcome_message.encode(), client_address)
+                    welcome_message.encode(), client_address
+                )
                 self.server_socket.sendto(
-                    update_message.encode(), client_address)
+                    update_message.encode(), client_address
+                )
 
                 # When a client successfully registers, the server sends the client a transformed version of the table
                 transformed_table = self.get_transformed_table()
                 self.server_socket.sendto(
-                    transformed_table.encode(), client_address)
+                    str(transformed_table).encode(), client_address
+                )
 
             # Close the server socket upon program termination
             # so it can be reused for future FileServer sessions.
@@ -335,7 +360,7 @@ def main():
     # Run FileServer.
     if getattr(args, "server"):
         file_server = FileServer(getattr(args, "port"))
-        file_server.receive_info()
+        file_server.register_client()
     else:
         file_client = FileClient(
             getattr(args, "name"),
