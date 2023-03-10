@@ -11,6 +11,7 @@ import threading
 """
 GENERAL UTILITIES
 """
+MAX_RETRIES = 2
 BUFFER_SIZE = 4096
 
 
@@ -131,20 +132,26 @@ class FileClient:
 
         Updates the client table with the information received from the server.
         """
-        register_message = f"{self.name},{self.client_udp_port},{self.client_tcp_port}"
+        # Client needs to send its name and port number for file transfers
+        # to the server.
+        register_message = f"{self.name},{self.client_tcp_port}"
         self.client_socket.sendto(
             register_message.encode(), (self.server_ip, self.server_port)
         )
 
-        # Receive welcome message, update message, and client table from server.
+        # Receive welcome message and client table from server.
         welcome_message, server_address = self.client_socket.recvfrom(BUFFER_SIZE)
         print(welcome_message.decode())
 
-        update_message, server_address = self.client_socket.recvfrom(BUFFER_SIZE)
-        print(update_message.decode())
-
         table, server_address = self.client_socket.recvfrom(BUFFER_SIZE)
         self.local_table = table.decode()
+
+        # Once the table is received, the client should send an ack to the server.
+        table_received_ack = ">>> [Client table updated.]"
+        print(f"{table_received_ack}")
+        self.client_socket.sendto(
+            "ACK".encode(), (self.server_ip, self.server_port)
+        )
         return
 
     def deregister(self):
@@ -209,7 +216,7 @@ class FileServer:
         """
         return
 
-    def add_client_info(self, name, status, client_ip, client_udp_port, client_tcp_port):
+    def add_client_info(self, name, status, client_ip, client_tcp_port):
         """
         Adds the client information to the registration table with an empty list of files.
 
@@ -218,7 +225,6 @@ class FileServer:
         self.table[name] = {
             "status": status,
             "client_ip": client_ip,
-            "client_udp_port": client_udp_port,
             "client_tcp_port": client_tcp_port,
             "files": []
         }
@@ -273,10 +279,10 @@ class FileServer:
         while True:
             try:
                 # Receive the registration request from the client
-                # Format: <name>,<client-udp-port>,<client-tcp-port>
-                message, client_address = self.server_socket.recvfrom(
-                    BUFFER_SIZE)
-                name, client_udp_port, client_tcp_port = message.decode().split(",")
+                # Format: <name>, <client_ip>, <client_tcp_port>
+                message, client_address = self.server_socket.recvfrom(BUFFER_SIZE)
+                print(message.decode())
+                name, client_tcp_port = message.decode().split(",")
 
                 # Check if the client is already registered.
                 if name in self.table:
@@ -288,13 +294,10 @@ class FileServer:
                 # Add the client information to the registration table and send a welcome message to the client.
                 welcome_message = ">>> [Welcome, You are registered.]"
                 self.add_client_info(
-                    name, "active", client_address, client_udp_port, client_tcp_port)
-                update_message = ">>> [Client table updated.]"
-                self.server_socket.sendto(
-                    welcome_message.encode(), client_address
+                    name, "active", client_address, client_tcp_port
                 )
                 self.server_socket.sendto(
-                    update_message.encode(), client_address
+                    welcome_message.encode(), client_address
                 )
 
                 # When a client successfully registers, the server sends the client a transformed version of the table
@@ -303,6 +306,27 @@ class FileServer:
                     str(transformed_table).encode(), client_address
                 )
 
+                # Continue if ACK received. 
+                # TODO: error handling
+                #  - what happens when client disconnects before table is sent?
+                #  - what do we resend when we retry?  welcome message and table or just table?
+                # If the server does not receive an ack from the client within 500 msecs, it
+                # should adopt a best effort approach by retrying 2 times.
+                for _ in range(MAX_RETRIES):
+                    self.server_socket.settimeout(0.5)
+
+                    try:
+                        ack, client_address = self.server_socket.recvfrom(BUFFER_SIZE)
+                        if ack.decode() == "ACK":
+                            break
+                        else: # TODO: get rid of this
+                            print("Should not be here.")
+                    except TimeoutError: # Try again.
+                        continue
+                
+                # Reset timeout to None so that it doesn't affect the next client.
+                self.server_socket.settimeout(None)
+                
             # Close the server socket upon program termination
             # so it can be reused for future FileServer sessions.
             except KeyboardInterrupt:
