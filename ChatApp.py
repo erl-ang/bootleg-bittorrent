@@ -5,6 +5,7 @@ The program is run in two modes: server and client.
 """
 import argparse
 from socket import *
+import ipaddress
 import threading
 
 """
@@ -17,7 +18,12 @@ def validate_args(args, parser):
     """
     Validates the command line arguments.
     """
-    # TODO: other validations - IP address
+    # Server IP address should be a valid IPv4 address.
+    try:
+        if args.client:
+            ipaddress.ip_address(getattr(args, "server-ip"))
+    except ValueError:
+        raise parser.error("Invalid IP address")
 
     # Port number should be an integer value in the range 1024-65535.
     ports = []
@@ -120,20 +126,25 @@ class FileClient:
 
     def register(self):
         """
-        Sends a UDP message to the server to register the client.
+        Sends a UDP message containing the client's name, UDP port, and TCP port to the server
+        in order to register itself to the server.
+
+        Updates the client table with the information received from the server.
         """
         register_message = f"{self.name},{self.client_udp_port},{self.client_tcp_port}"
         self.client_socket.sendto(
-            register_message.encode(), (self.server_ip, self.server_port))
+            register_message.encode(), (self.server_ip, self.server_port)
+        )
 
+        # Receive welcome message, update message, and client table from server.
         welcome_message, server_address = self.client_socket.recvfrom(BUFFER_SIZE)
         print(welcome_message.decode())
+
         update_message, server_address = self.client_socket.recvfrom(BUFFER_SIZE)
         print(update_message.decode())
-        table, server_address = self.client_socket.recvfrom(BUFFER_SIZE)
-        
 
-        self.execute_commands()
+        table, server_address = self.client_socket.recvfrom(BUFFER_SIZE)
+        self.local_table = table.decode()
         return
 
     def deregister(self):
@@ -143,6 +154,13 @@ class FileClient:
         When a client is about to go offline, it immediately stops listening and ignores
         incoming requests on the TCP port for incoming file requests.
         """
+        # Notify de-registration action to the server. 
+        # TODO: server needs to detect and the client status should be changed to offline.
+        dereg_message = "dereg {self.name}"
+        self.client_socket.sendto(
+            dereg_message.encode(), (self.server_ip, self.server_port)
+        )
+
         self.client_socket.close()
 
         print(">>> [You are now Offline. Bye.]")
@@ -217,11 +235,34 @@ class FileServer:
         version of the table is also broadcasted whenever a client offers a new file to be shared.
         TODO: (Section 2.2)
         """
+        # Tranformed Table Format:
+        # {
+        #   "filename": [{
+        #       "owner": "client1",
+        #       "ip_address": localhost,
+        #       "tcp_port": 1234
+        #       }, { // another client offering the same file }
+        #   ],
+        #   "filename2": [{ ... }, { ... }]
+        #   }
         transformed_table = dict()
-        for client_info in self.table:
-            pass
 
-        return {}
+        # Format the tracker table to the transformed table to send to clients.
+        # This format allows clients to query by a filename.
+        for client_name, client_info in self.table.items():
+            contact_info = {
+                "owner": client_name,
+                "ip_address": client_info["client_ip"],
+                "tcp_port": client_info["client_tcp_port"]
+            }
+
+            for file in client_info["files"]:
+                if file not in transformed_table.keys():
+                    transformed_table[file] = [contact_info,]
+                else:
+                    transformed_table[file].append(contact_info)
+
+        return transformed_table
 
     def register_client(self):
         """
@@ -370,6 +411,7 @@ def main():
             getattr(args, "client-tcp-port")
         )
         file_client.register()
+        file_client.execute_commands()
     return
 
 
