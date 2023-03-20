@@ -75,22 +75,28 @@ class FileClient:
 
     def execute_commands(self):
         while True:
-            command, args = input(">>> ")
-            if command == "setdir":
-                self.set_dir()
-            elif command == "offer":
-                self.offer_file()
-            elif command == "list":
-                self.list_files()
-            elif command == "get":
-                self.get_file()
-            elif command == "deregister":
-                self.deregister()
-            elif command == "exit":
-                self.deregister()
+            try:
+                command, args = input(">>> ")
+                if command == "setdir":
+                    self.set_dir()
+                elif command == "offer":
+                    self.offer_file()
+                elif command == "list":
+                    self.list_files()
+                elif command == "get":
+                    self.get_file()
+                elif command == "deregister":
+                    self.deregister()
+                elif command == "exit":
+                    self.deregister()
+                    break
+                else:
+                    print(">>> [Invalid command. Please try again.]")
+            except KeyboardInterrupt:
+                self.client_socket.close()
+                print(f"!!! Client {self.name} left silently")
                 break
-            else:
-                print(">>> [Invalid command. Please try again.]")
+
         return
 
     def request_file(self, file_name, file_owner):
@@ -140,7 +146,8 @@ class FileClient:
         )
 
         # Receive welcome message and client table from server.
-        welcome_message, server_address = self.client_socket.recvfrom(BUFFER_SIZE)
+        welcome_message, server_address = self.client_socket.recvfrom(
+            BUFFER_SIZE)
         print(welcome_message.decode())
 
         table, server_address = self.client_socket.recvfrom(BUFFER_SIZE)
@@ -161,7 +168,7 @@ class FileClient:
         When a client is about to go offline, it immediately stops listening and ignores
         incoming requests on the TCP port for incoming file requests.
         """
-        # Notify de-registration action to the server. 
+        # Notify de-registration action to the server.
         # TODO: server needs to detect and the client status should be changed to offline.
         dereg_message = "dereg {self.name}"
         self.client_socket.sendto(
@@ -264,7 +271,7 @@ class FileServer:
 
             for file in client_info["files"]:
                 if file not in transformed_table.keys():
-                    transformed_table[file] = [contact_info,]
+                    transformed_table[file] = [contact_info, ]
                 else:
                     transformed_table[file].append(contact_info)
 
@@ -279,9 +286,10 @@ class FileServer:
         while True:
             try:
                 # Receive the registration request from the client
-                # Format: <name>, <client_ip>, <client_tcp_port>
-                message, client_address = self.server_socket.recvfrom(BUFFER_SIZE)
-                print(message.decode())
+                # Format: <name>, <client_tcp_port>
+                message, client_address = self.server_socket.recvfrom(
+                    BUFFER_SIZE)
+                print(f"!!registration request: {message.decode()}")
                 name, client_tcp_port = message.decode().split(",")
 
                 # Check if the client is already registered.
@@ -306,7 +314,7 @@ class FileServer:
                     str(transformed_table).encode(), client_address
                 )
 
-                # Continue if ACK received. 
+                # Continue if ACK received.
                 # TODO: error handling
                 #  - what happens when client disconnects before table is sent?
                 #  - what do we resend when we retry?  welcome message and table or just table?
@@ -316,17 +324,19 @@ class FileServer:
                     self.server_socket.settimeout(0.5)
 
                     try:
-                        ack, client_address = self.server_socket.recvfrom(BUFFER_SIZE)
+                        ack, client_address = self.server_socket.recvfrom(
+                            BUFFER_SIZE)
                         if ack.decode() == "ACK":
                             break
-                        else: # TODO: get rid of this
+                        else:  # TODO: get rid of this
                             print("Should not be here.")
-                    except TimeoutError: # Try again.
+                            print(f"message received: {ack.decode()}")
+                    except TimeoutError:  # Try again.
                         continue
-                
+
                 # Reset timeout to None so that it doesn't affect the next client.
                 self.server_socket.settimeout(None)
-                
+
             # Close the server socket upon program termination
             # so it can be reused for future FileServer sessions.
             except KeyboardInterrupt:
