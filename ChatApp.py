@@ -11,6 +11,7 @@ import threading
 """
 GENERAL UTILITIES
 """
+# Max number of retries for the server to send its table to the client when it registers.
 MAX_RETRIES = 2
 BUFFER_SIZE = 4096
 
@@ -76,9 +77,11 @@ class FileClient:
     def execute_commands(self):
         while True:
             try:
-                command, args = input(">>> ")
+                # 
+                command_string = input(">>> ")
+                command, *args = command_string.split(" ")
                 if command == "setdir":
-                    self.set_dir()
+                    self.set_dir(args)
                 elif command == "offer":
                     self.offer_file()
                 elif command == "list":
@@ -149,6 +152,9 @@ class FileClient:
         welcome_message, server_address = self.client_socket.recvfrom(
             BUFFER_SIZE)
         print(welcome_message.decode())
+        if welcome_message.decode() != ">>> [Welcome, You are registered.]":
+            print("!!!already registered, exiting...")
+            return False
 
         table, server_address = self.client_socket.recvfrom(BUFFER_SIZE)
         self.local_table = table.decode()
@@ -159,7 +165,7 @@ class FileClient:
         self.client_socket.sendto(
             "ACK".encode(), (self.server_ip, self.server_port)
         )
-        return
+        return True
 
     def deregister(self):
         """
@@ -310,9 +316,6 @@ class FileServer:
 
                 # When a client successfully registers, the server sends the client a transformed version of the table
                 transformed_table = self.get_transformed_table()
-                self.server_socket.sendto(
-                    str(transformed_table).encode(), client_address
-                )
 
                 # Continue if ACK received.
                 # TODO: error handling
@@ -320,8 +323,12 @@ class FileServer:
                 #  - what do we resend when we retry?  welcome message and table or just table?
                 # If the server does not receive an ack from the client within 500 msecs, it
                 # should adopt a best effort approach by retrying 2 times.
-                for _ in range(MAX_RETRIES):
-                    self.server_socket.settimeout(0.5)
+                self.server_socket.settimeout(0.5)
+                for _ in range(MAX_RETRIES + 1): # +1 because the first try is not a retry.
+                    # Send the transformed table to the client.
+                    self.server_socket.sendto(
+                        str(transformed_table).encode(), client_address
+                    )
 
                     try:
                         ack, client_address = self.server_socket.recvfrom(
@@ -444,8 +451,9 @@ def main():
             getattr(args, "client-udp-port"),
             getattr(args, "client-tcp-port")
         )
-        file_client.register()
-        file_client.execute_commands()
+        # If the client successfully registers with the server, execute the commands.
+        if file_client.register():
+            file_client.execute_commands()
     return
 
 
