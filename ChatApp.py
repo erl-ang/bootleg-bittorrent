@@ -6,6 +6,7 @@ The program is run in two modes: server and client.
 import argparse
 from socket import *
 import ipaddress
+import os
 import threading
 
 """
@@ -75,15 +76,33 @@ class FileClient:
         return
 
     def execute_commands(self):
+        """
+        Executes the commands entered by the client.
+
+        Commands:
+        TODO: docstring
+        """
+        # Initially, the client has not set a directory containing the files
+        # it is going to offer.
+        dir_set = False
         while True:
             try:
-                # 
                 command_string = input(">>> ")
-                command, *args = command_string.split(" ")
+                # Command will be in the form of "command arg1 arg2 ..."
+                # args is [arg1, arg2, ...]
+                command_args = command_string.split(" ")
+                command = command_args[0]
+                args = command_args[1:]
+
                 if command == "setdir":
-                    self.set_dir(args)
+                    # Assumes that the directory name is the first argument.
+                    # TODO: include error handling for no arguments/more than one argument.
+                    dir_set = self.set_dir(args[0])
                 elif command == "offer":
-                    self.offer_file()
+                    if not dir_set:
+                        print(">>> [Please set a directory first.]")
+                    else:
+                        self.offer_file(args)
                 elif command == "list":
                     self.list_files()
                 elif command == "get":
@@ -101,6 +120,62 @@ class FileClient:
                 break
 
         return
+    
+    def set_dir(self, dir_name):
+        """
+        Section 2.2
+
+        Sets the directory containing the files that the client is going to offer.
+        """
+        # Check for existence of the directory in the filesystem.
+        if os.path.isdir(dir_name):
+            print(f">>> [Successfully set {dir_name} as the directory for searching offered files.]")
+            return True
+        else:
+            print(f">>> [setdir failed: {dir_name} does not exist.]")
+            return False
+    
+    def offer_file(self, file_list):
+        """
+        Sends a UDP message to the server containing the list of files
+        that the client is offering.
+
+
+        """
+        print(f"files: {file_list}")
+
+        # Client must wait for an ack from the server that it has
+        # successfully received the file offerings.
+        # If the ack times out, the client will retry two times. 
+        # The server's ack might never reach the client if the server
+        # is too busy at the moment or if there is a network partition
+        # that prevents the client message from reaching the server.
+        # self.client_socket.settimeout(0.5)
+        # offer_acked = False
+        # for _ in range(MAX_RETRIES + 1): # +1 because the first try is not a retry
+            
+        #     # Send file offerings to the server.
+        #     self.client_socket.sendto(
+        #         str(files).encode(), (self.server_ip, self.server_port)
+        #     )
+        #     try:
+        #         # Wait for ack from the server.
+        #         ack, server_address = self.client_socket.recvfrom(BUFFER_SIZE)
+        #         if ack.decode() == "ACK":
+        #             print(f">>> [Offer Message received by Server.]")
+        #             offer_acked = True
+        #             break
+        #         else:
+        #             print("!!! Shouldn't be here")
+        #             print(f"message received: {ack.decode()}")
+        #     except TimeoutError: # Try again.
+        #         print("!!! Trying again")
+        #         continue
+        
+        # if not offer_acked:
+        #     print(">>> [No ACK from Server, please try again later.]")
+        return
+
 
     def request_file(self, file_name, file_owner):
         """
@@ -126,13 +201,6 @@ class FileClient:
         # If no file offerings are available:
         print(">>> [No files available for download at the moment.]")
         return
-
-    def offer_file(self):
-        """
-        FileClients advertise their file offerings to other registered clients through the server.
-
-        """
-        pass
 
     def register(self):
         """
@@ -339,6 +407,7 @@ class FileServer:
                             print("Should not be here.")
                             print(f"message received: {ack.decode()}")
                     except TimeoutError:  # Try again.
+                        print("!!! Trying again")
                         continue
 
                 # Reset timeout to None so that it doesn't affect the next client.
