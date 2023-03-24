@@ -72,8 +72,8 @@ class FileClient:
         self.client_tcp_port = client_tcp_port
 
         self.client_udp_socket = socket(AF_INET, SOCK_DGRAM)
+        self.client_udp_socket.bind(("", self.client_udp_port))
         self.client_tcp_socket = socket(AF_INET, SOCK_STREAM)
-
 
         self.local_table = {}
         return
@@ -103,7 +103,7 @@ class FileClient:
                     dir_set = self.set_dir(args[0])
                 elif command == "offer":
                     if not dir_set:
-                        print(">>> [Please set a directory first.]")
+                        print(">>> [Please set a directory first. Usage: setdir <dir>.]")
                     else:
                         self.offer_file(args)
                 elif command == "list":
@@ -119,7 +119,7 @@ class FileClient:
                     print(">>> [Invalid command. Please try again.]")
             except KeyboardInterrupt:
                 self.client_udp_socket.close()
-                print(f"!!! Client {self.name} left silently")
+                print(f"!!! Client {self.name} left silently - execute_commands")
                 break
 
         return
@@ -131,14 +131,15 @@ class FileClient:
         """
         # After going through the registration process, the client's udp socket
         # is already bound to the client_udp_port. So, we don't need to bind it again.
+        print(f"!!! Client {self.name} is listening for UDP messages on port {self.client_udp_port}...")
         while True:
             try:
                 message, server_address = self.client_udp_socket.recvfrom(BUFFER_SIZE)
                 print(f"message: {message.decode()}")
                 # TODO: handle message
-            except KeyboardInterrupt:
+            except:
                 self.client_udp_socket.close()
-                print(f"!!! Client {self.name} left silently")
+                print(f"!!! Client {self.name} left silently - listen_for_server_updates")
                 break
         return
     
@@ -151,7 +152,7 @@ class FileClient:
         """
         self.client_tcp_socket.bind(("", self.client_tcp_port))
         self.client_tcp_socket.listen(1)
-        print("f!!! Client {self.name} is listening for TCP connections on port {self.client_tcp_port}...")
+        print(f"!!! Client {self.name} is listening for TCP connections on port {self.client_tcp_port}...")
 
         while True:
             try:
@@ -159,9 +160,9 @@ class FileClient:
                 print(f"!!! Client {self.name} received a TCP connection request from {client_address}")
                 # TODO: handle message
                 # connection_socket.close()
-            except KeyboardInterrupt:
-                self.client_tcp_socket.close()
-                print(f"!!! Client {self.name} left silently")
+            except:
+                # TODO: This isn't printing for some reason.
+                print(f"!!! Client {self.name} left silently - listen_for_file_requests")
                 break
         return
 
@@ -197,30 +198,30 @@ class FileClient:
         # The server's ack might never reach the client if the server
         # is too busy at the moment or if there is a network partition
         # that prevents the client message from reaching the server.
-        # self.client_socket.settimeout(0.5)
-        # offer_acked = False
-        # for _ in range(MAX_RETRIES + 1): # +1 because the first try is not a retry
+        # self.client_udp_socket.settimeout(0.5)
+        offer_acked = False
+        for _ in range(MAX_RETRIES + 1): # +1 because the first try is not a retry
 
-        #     # Send file offerings to the server.
-        #     self.client_socket.sendto(
-        #         str(files).encode(), (self.server_ip, self.server_port)
-        #     )
-        #     try:
-        #         # Wait for ack from the server.
-        #         ack, server_address = self.client_socket.recvfrom(BUFFER_SIZE)
-        #         if ack.decode() == "ACK":
-        #             print(f">>> [Offer Message received by Server.]")
-        #             offer_acked = True
-        #             break
-        #         else:
-        #             print("!!! Shouldn't be here")
-        #             print(f"message received: {ack.decode()}")
-        #     except TimeoutError: # Try again.
-        #         print("!!! Trying again")
-        #         continue
+            # Send file offerings to the server.
+            self.client_udp_socket.sendto(
+                str(file_list).encode(), (self.server_ip, self.server_port)
+            )
+            try:
+                # Wait for ack from the server.
+                ack, server_address = self.client_udp_socket.recvfrom(BUFFER_SIZE)
+                if ack.decode() == "ACK":
+                    print(f">>> [Offer Message received by Server.]")
+                    offer_acked = True
+                    break
+                else:
+                    print("!!! Shouldn't be here")
+                    print(f"message received: {ack.decode()}")
+            except TimeoutError: # Try again.
+                print("!!! Trying again")
+                continue
 
-        # if not offer_acked:
-        #     print(">>> [No ACK from Server, please try again later.]")
+        if not offer_acked:
+            print(">>> [No ACK from Server, please try again later.]")
         return
 
     def request_file(self, file_name, file_owner):
@@ -337,17 +338,28 @@ class FileServer:
         self.port = port
         self.server_socket = self.bind_server(self.port)
         self.table = dict()
+        self.client_threads = []
         return
+    
+    def bind_server(self, serverPort):
+        """
+        TODO: take out functionality into separate functions
+        """
+        serverSocket = socket(AF_INET, SOCK_DGRAM)
+        serverSocket.bind(((''), serverPort))
+        print("!!The server is ready to receive")
+        return serverSocket
 
-    def add_client_info(self, name, status, client_ip, client_tcp_port):
+    def add_client_info(self, name, status, client_address, client_tcp_port):
         """
         Adds the client information to the registration table with an empty list of files.
 
         It is assumed that a client will not register again using the same information after it exits via Silent leave.
         """
-        self.table[name] = {
+        self.table[client_address] = {
+            "name": name,
             "status": status,
-            "client_ip": client_ip,
+            "client_ip": client_address[1],
             "client_tcp_port": client_tcp_port,
             "files": []
         }
@@ -392,86 +404,119 @@ class FileServer:
                     transformed_table[file].append(contact_info)
 
         return transformed_table
+    
+    def listen_for_requests(self):
+        """
+        The server needs to differentiate between the following types of requests:
+        1. Registration request from a client
+        2. File sharing request from a client
+        """
+        while True:
+            try:
+                message, client_address = self.server_socket.recvfrom(BUFFER_SIZE)
+                print(f"!!message from {client_address}: {message.decode()}")
 
-    def register_client(self):
+                if client_address not in self.table.keys():
+                    self.register_clients(message, client_address)
+                else:
+                    self.handle_client_offer(message)
+            except KeyboardInterrupt: 
+                # Close the server socket upon program termination
+                # so it can be reused for future FileServer sessions.
+                self.server_socket.close()
+                print("Server terminated.")
+                break
+        return
+
+    def register_clients(self, message, client_address):
         """
         Listens for UDP messages from clients and registers them.
         """
         welcome_message = ""
 
+        # Receive the registration request from the client
+        # Format: <name>, <client_udp_port>,<client_tcp_port>
+        # message, client_address = self.server_socket.recvfrom(
+        #     BUFFER_SIZE)
+        print(f"!!registration request from {client_address}: {message.decode()}")
+        name, client_tcp_port = message.decode().split(",")
+
+        # Check if the client is already registered.
+        for existing_client_info in self.table.values():
+            if name == existing_client_info["name"]:
+                welcome_message = f"Client {name} already registered. Registration rejected."
+                self.server_socket.sendto(
+                    welcome_message.encode(), client_address)
+                return
+
+        # Add the client information to the registration table and send a welcome message to the client.
+        welcome_message = ">>> [Welcome, You are registered.]"
+        self.add_client_info(
+            name, "active", client_address, client_tcp_port
+        )
+        self.server_socket.sendto(
+            welcome_message.encode(), client_address
+        )
+
+        # When a client successfully registers, the server sends the client a transformed version of the table
+        transformed_table = self.get_transformed_table()
+
+        # Continue if ACK received.
+        # TODO: error handling
+        #  - what happens when client disconnects before table is sent?
+        #  - what do we resend when we retry?  welcome message and table or just table?
+        # If the server does not receive an ack from the client within 500 msecs, it
+        # should adopt a best effort approach by retrying 2 times.
+        # self.server_socket.settimeout(0.5)
+        for _ in range(MAX_RETRIES + 1):  # +1 because the first try is not a retry.
+            # Send the transformed table to the client.
+            self.server_socket.sendto(
+                str(transformed_table).encode(), client_address
+            )
+
+            try:
+                ack, client_address = self.server_socket.recvfrom(
+                    BUFFER_SIZE)
+                if ack.decode() == "ACK":
+                    break
+                else:  # TODO: get rid of this
+                    print("Should not be here.")
+                    print(f"message received: {ack.decode()}")
+            except TimeoutError:  # Try again.
+                print("!!! Trying again")
+                continue
+
+        # Reset timeout to None so that it doesn't affect the next client.
+        self.server_socket.settimeout(None)
+
+        return
+    
+    def listen_for_offers(self):
+        """
+        Listens for UDP messages from clients offering files to be shared.
+        """
         while True:
             try:
-                # Receive the registration request from the client
-                # Format: <name>, <client_tcp_port>
+                # Receive the offer from the client
+                # Format: <name>, <filename>
                 message, client_address = self.server_socket.recvfrom(
                     BUFFER_SIZE)
-                print(f"!!registration request: {message.decode()}")
-                name, client_tcp_port = message.decode().split(",")
+                print(">>> [Offer Message Received By Server]")
+                print(f"client address: {client_address}")
+                print(f"!!offer received: {message.decode()}")
+                name, filename = message.decode().split(",")
 
-                # Check if the client is already registered.
-                if name in self.table:
-                    welcome_message = f"Client {name} already registered. Registration rejected."
-                    self.server_socket.sendto(
-                        welcome_message.encode(), client_address)
-                    continue
+                # Add the file to the client's list of files.
+                self.table[name]["files"].append(filename)
 
-                # Add the client information to the registration table and send a welcome message to the client.
-                welcome_message = ">>> [Welcome, You are registered.]"
-                self.add_client_info(
-                    name, "active", client_address, client_tcp_port
-                )
-                self.server_socket.sendto(
-                    welcome_message.encode(), client_address
-                )
-
-                # When a client successfully registers, the server sends the client a transformed version of the table
+                # When a client offers a new file to be shared, the server sends a transformed version of the table
+                # to all the registered clients.
                 transformed_table = self.get_transformed_table()
 
                 # Continue if ACK received.
-                # TODO: error handling
-                #  - what happens when client disconnects before table is sent?
-                #  - what do we resend when we retry?  welcome message and table or just table?
-                # If the server does not receive an ack from the client within 500 msecs, it
-                # should adopt a best effort approach by retrying 2 times.
-                self.server_socket.settimeout(0.5)
-                # +1 because the first try is not a retry.
-                for _ in range(MAX_RETRIES + 1):
-                    # Send the transformed table to the client.
-                    self.server_socket.sendto(
-                        str(transformed_table).encode(), client_address
-                    )
-
-                    try:
-                        ack, client_address = self.server_socket.recvfrom(
-                            BUFFER_SIZE)
-                        if ack.decode() == "ACK":
-                            break
-                        else:  # TODO: get rid of this
-                            print("Should not be here.")
-                            print(f"message received: {ack.decode()}")
-                    except TimeoutError:  # Try again.
-                        print("!!! Trying again")
-                        continue
-
-                # Reset timeout to None so that it doesn't affect the next client.
-                self.server_socket.settimeout(None)
-
-            # Close the server socket upon program termination
-            # so it can be reused for future FileServer sessions.
-            except KeyboardInterrupt:
-                self.server_socket.close()
-                print("Server socket closed.")
-                break
+            except:
+                pass
         return
-
-    def bind_server(self, serverPort):
-        """
-        TODO: take out functionality into separate functions
-        """
-        serverSocket = socket(AF_INET, SOCK_DGRAM)
-        serverSocket.bind(((''), serverPort))
-        print("!!The server is ready to receive")
-        return serverSocket
 
     def get_client_info(self):
         """
@@ -480,6 +525,8 @@ class FileServer:
         and port numbers for other clients to connect to
         """
         pass
+
+
 
 
 def main():
@@ -554,7 +601,8 @@ def main():
     # Run FileServer.
     if getattr(args, "server"):
         file_server = FileServer(getattr(args, "port"))
-        file_server.register_client()
+        file_server.listen_for_requests()
+        
     else:
         file_client = FileClient(
             getattr(args, "name"),
@@ -573,17 +621,23 @@ def main():
             # TODO: join threads when program terminates -- keyboard interrupt
             t1 = threading.Thread(target=file_client.listen_for_file_requests)
             t2 = threading.Thread(target=file_client.listen_for_server_updates)
-            t3 = threading.Thread(target=file_client.execute_commands)
 
-            # Start the threads.
-            t1.start()
-            t2.start()
-            t3.start()
 
-            # Wait for the threads to finish.
-            t1.join()
-            t2.join()
-            t3.join()
+            # Start the threads and wait for them to finish.
+            # Gracefully terminate the threads when the program terminates.
+            # If main thread terminates, the daemon threads will terminate.
+            t1.setDaemon(True)
+            t2.setDaemon(True)
+            
+            try:
+                t1.start()
+                t2.start()
+                file_client.execute_commands()
+            except KeyboardInterrupt:
+                file_client.client_tcp_socket.close()
+                file_client.client_udp_socket.close()
+                t1.join()
+                t2.join()
 
             # Close the client socket upon program termination
             # so it can be reused for future FileClient sessions.
