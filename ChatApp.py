@@ -150,12 +150,12 @@ class FileClient:
         while True:
             try:
                 message, server_address = self.client_udp_socket.recvfrom(BUFFER_SIZE)
-                if message.decode().split(",")[0] == "table_update":
-                    self.local_table = message.decode().split(",")[1]
-                else: # Message was not meant for this thread. Put it in the queue.
+                if message.decode() == "ACK": # Message was not meant for this thread. Put it in the queue.
                     self.client_udp_socket.settimeout(None)
                     self.work_queue.put(message.decode())
-                print(f"message: {message.decode()}")
+                else: # The client received a broadcast table update from the server.
+                    self.local_table = json.loads(message)
+                print(f"!!!message: {message.decode()}")
             except Exception as e:
                 print(f"!! {e}")
 
@@ -398,16 +398,19 @@ class FileServer:
 
         The same client cannot offer the same file twice.
         """
-        # Add the file to the client's list of files in the server's registration table.
+        # Add the file to the client's list of files in the server's
+        # registration table.
         if file_name not in self.table[client_address]["files"]:
             self.table[client_address]["files"].add(file_name)
 
             # Add the file to the client table view.
-            self.client_table_view[file_name] = {
-                "client_name": self.table[client_address]["name"],
-                "ip_address": client_address[0],
-                "tcp_port": self.table[client_address]["client_tcp_port"]
-                }
+            # Format:
+            #   (file_name, client_name) : (client_ip, client_tcp_port)
+            client_name = self.table[client_address]["name"]
+            self.client_table_view[str(file_name) + "," + str(client_name)] = (
+                client_address[0],
+                self.table[client_address]["client_tcp_port"]
+            )
         return
 
     # def get_transformed_table(self):
@@ -496,7 +499,7 @@ class FileServer:
         # Add the client information to the registration table and send a welcome message to the client.
         welcome_message = ">>> [Welcome, You are registered.]"
         self.add_client_info(
-            name, "active", client_address, client_tcp_port
+            name, "active", client_address, int(client_tcp_port)
         )
         self.server_socket.sendto(
             welcome_message.encode(), client_address
@@ -562,13 +565,23 @@ class FileServer:
             self.add_file(client_address=client_address, file_name=file)
         
         # When a client offers a new file to be shared, the server sends a transformed version of the table
-        # to all the registered clients.
-        for client_address in self.table:
-            # send the transformed table to the client.
-            pass
+        # to all the registered clients. 
+        # Remove inactive clients from the client table view.
+        for client_file_offer in self.client_table_view:
+            if self.table[client_address]["status"] != "active":
+                self.client_table_view.pop(client_file_offer, "!!Already deleted") 
+        
         print(f"!!current table: {self.table}")
-
-
+        print(f"!!broadcasting client view: {self.client_table_view}")
+                
+        # Broadcast the transformed table to all the registered clients.
+        for client_address in self.table.keys():
+            if self.table[client_address]["status"] == "active":
+                self.server_socket.sendto(
+                    str.encode(json.dumps(self.client_table_view)), client_address
+                )
+                print(f"!!sent table to {client_address}")
+        
         # Continue if ACK received.
         
         return
