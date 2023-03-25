@@ -10,6 +10,8 @@ import os
 import threading
 import queue
 import json
+import operator
+from prettytable import PrettyTable
 
 """
 GENERAL UTILITIES
@@ -84,7 +86,6 @@ class FileClient:
         # the thread listening for the update might get the ACK
         # or the thread listening for the ACK might get the update.
         self.work_queue = queue.Queue()
-        self.waiting_for_ack = True
 
         self.local_table = dict()
         return
@@ -247,7 +248,36 @@ class FileClient:
         
         self.client_udp_socket.settimeout(None)
         return
+    
+    def list_files(self):
+        """
+        Prints out the list of available file offerings by other clients.
 
+        FileClients use only its local table to list the files that are available for download.
+        """
+        # No file offerings are available.
+        if len(self.local_table) == 0:
+            print(">>> [No files available for download at the moment.]")
+        
+        # Create the formatted table using pretty table.
+        formatted_table = PrettyTable(border=False, hrules=False)
+        formatted_table.field_names = ["FILENAME", "OWNER", "IP ADDRESS", "TCP PORT"]
+        formatted_table.align = "l"
+
+        for file_name_owner_info in self.local_table.keys():
+            file_name, owner = file_name_owner_info.split(",")
+            formatted_table.add_row([
+                file_name,
+                owner,
+                self.local_table[file_name_owner_info][0],
+                self.local_table[file_name_owner_info][1]
+            ])
+
+        # Sort the table alphabetically by filename. Ties are broken by owner.
+        print(formatted_table.get_string(sort_key=operator.itemgetter(0, 1), sortby="FILENAME"))
+        return
+        
+        
     def request_file(self, file_name, file_owner):
         """
         Sends a TCP message to the client to request the file.
@@ -258,19 +288,6 @@ class FileClient:
         print(f"< Connection with client {file_owner} closed. >")
 
         # TODO: deny file request
-        return
-
-    def list_files(self):
-        """
-        Prints out the list of available file offerings by other clients.
-
-        FileClients use only its local table to list the files that are available for download.
-        """
-        print(self.local_table)
-        # TODO: pretty formatting?
-
-        # If no file offerings are available:
-        print(">>> [No files available for download at the moment.]")
         return
 
     def register(self):
@@ -296,7 +313,8 @@ class FileClient:
             return False
 
         table, server_address = self.client_udp_socket.recvfrom(BUFFER_SIZE)
-        self.local_table = table.decode()
+        # Json.loads() requires double quotes for keys and values.
+        self.local_table = json.loads(table.decode().replace("\'", "\""))
         print(f"local table: {self.local_table}")
 
         # Once the table is received, the client should send an ack to the server.
@@ -326,18 +344,6 @@ class FileClient:
 
         print(">>> [You are now Offline. Bye.]")
         pass
-
-    def get_client_table(self):
-        """
-        Sends a UDP message to the server to get the client table.
-        """
-        # get_table_message = f"Getting client table"
-        # self.client_socket.sendto(message.encode(),(self.server_ip, self.server_port))
-        # modified_message, server_address = self.client_socket.recvfrom(BUFFER_SIZE)
-        # print(modified_message.decode())
-        # self.client_socket.close()
-        return {}
-
 
 """
 Functionality for FileServer
