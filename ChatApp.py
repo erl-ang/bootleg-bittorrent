@@ -314,7 +314,7 @@ class FileClient:
 
         table, server_address = self.client_udp_socket.recvfrom(BUFFER_SIZE)
         # Json.loads() requires double quotes for keys and values.
-        self.local_table = json.loads(table.decode().replace("\'", "\""))
+        self.local_table = json.loads(table)
         print(f"local table: {self.local_table}")
 
         # Once the table is received, the client should send an ack to the server.
