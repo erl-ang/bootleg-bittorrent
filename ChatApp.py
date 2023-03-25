@@ -8,6 +8,8 @@ from socket import *
 import ipaddress
 import os
 import threading
+import queue
+import json
 
 """
 GENERAL UTILITIES
@@ -75,7 +77,16 @@ class FileClient:
         self.client_udp_socket.bind(("", self.client_udp_port))
         self.client_tcp_socket = socket(AF_INET, SOCK_STREAM)
 
-        self.local_table = {}
+        # The client has to both listen to incoming server
+        # updates and ACKs from the server to make sure that
+        # the server has received the client's file offerings.
+        # Because they are both recving from the same UDP port,
+        # the thread listening for the update might get the ACK
+        # or the thread listening for the ACK might get the update.
+        self.work_queue = queue.Queue()
+        self.waiting_for_ack = True
+
+        self.local_table = dict()
         return
 
     def execute_commands(self):
@@ -128,6 +139,10 @@ class FileClient:
         """
         The client will listen for UDP messages from the server
         on the client_udp_port.
+
+        The UDP messages from the server can be:
+        1. ACK for the client's file offerings
+        2. Table update from the server
         """
         # After going through the registration process, the client's udp socket
         # is already bound to the client_udp_port. So, we don't need to bind it again.
@@ -135,9 +150,15 @@ class FileClient:
         while True:
             try:
                 message, server_address = self.client_udp_socket.recvfrom(BUFFER_SIZE)
+                if message.decode().split(",")[0] == "table_update":
+                    self.local_table = message.decode().split(",")[1]
+                else: # Message was not meant for this thread. Put it in the queue.
+                    self.client_udp_socket.settimeout(None)
+                    self.work_queue.put(message.decode())
                 print(f"message: {message.decode()}")
-                # TODO: handle message
-            except:
+            except Exception as e:
+                print(f"!! {e}")
+
                 self.client_udp_socket.close()
                 print(f"!!! Client {self.name} left silently - listen_for_server_updates")
                 break
@@ -188,40 +209,43 @@ class FileClient:
         containing the list of files that the client is offering.
 
         """
-        print(f"files: {file_list}")
-
-       
+        print(f"files offered: {file_list}")
 
         # Client must wait for an ack from the server that it has
         # successfully received the file offerings.
         # If the ack times out, the client will retry two times.
-        # The server's ack might never reach the client if the server
-        # is too busy at the moment or if there is a network partition
-        # that prevents the client message from reaching the server.
-        # self.client_udp_socket.settimeout(0.5)
         offer_acked = False
+
+        # The listen_for_server_updates thread will be listening for the ack.
+        # but does not know how long to wait for the ack.
+        self.client_udp_socket.settimeout(0.5) 
         for _ in range(MAX_RETRIES + 1): # +1 because the first try is not a retry
 
             # Send file offerings to the server.
             self.client_udp_socket.sendto(
-                str(file_list).encode(), (self.server_ip, self.server_port)
+                json.dumps(file_list).encode(), (self.server_ip, self.server_port)
             )
             try:
-                # Wait for ack from the server.
-                ack, server_address = self.client_udp_socket.recvfrom(BUFFER_SIZE)
-                if ack.decode() == "ACK":
+                # If there is an ack available, the listen_for_server_updates
+                # thread will put the ack in the queue.
+                ack = self.work_queue.get()
+                if ack == "ACK":
                     print(f">>> [Offer Message received by Server.]")
                     offer_acked = True
                     break
                 else:
-                    print("!!! Shouldn't be here")
-                    print(f"message received: {ack.decode()}")
-            except TimeoutError: # Try again.
+                    continue
+            except queue.Empty: # Try again.
                 print("!!! Trying again")
                 continue
-
+        
+        # The server's ack might never reach the client if the server
+        # is too busy at the moment or if there is a network partition
+        # that prevents the client message from reaching the server.
         if not offer_acked:
             print(">>> [No ACK from Server, please try again later.]")
+        
+        self.client_udp_socket.settimeout(None)
         return
 
     def request_file(self, file_name, file_owner):
@@ -273,12 +297,13 @@ class FileClient:
 
         table, server_address = self.client_udp_socket.recvfrom(BUFFER_SIZE)
         self.local_table = table.decode()
+        print(f"local table: {self.local_table}")
 
         # Once the table is received, the client should send an ack to the server.
         table_received_ack = ">>> [Client table updated.]"
         print(f"{table_received_ack}")
         self.client_udp_socket.sendto(
-            "ACK".encode(), (self.server_ip, self.server_port)
+            "ACK".encode(), (self.server_ip, self.server_port) # change to server address
         )
         return True
 
@@ -338,7 +363,8 @@ class FileServer:
         self.port = port
         self.server_socket = self.bind_server(self.port)
         self.table = dict()
-        self.client_threads = []
+
+        self.client_table_view = dict()
         return
     
     def bind_server(self, serverPort):
@@ -361,49 +387,69 @@ class FileServer:
             "status": status,
             "client_ip": client_address[1],
             "client_tcp_port": client_tcp_port,
-            "files": []
+            "files": set()
         }
         return
-
-    def get_transformed_table(self):
+    
+    def add_file(self, client_address, file_name):
         """
-        Returns a transformed version of the table intended to be sent to clients.
+        Adds the file to the list of files that the client is sharing to
+        the registration table and the client table view.
 
-        The transformed table is a dictionary of all the filenames offered by clients along with the client name of the
-        file owner, the IPaddress and the TCP port number at which each file can be requested.
-
-        This allows the registered client to initialize its local table. This transformed
-        version of the table is also broadcasted whenever a client offers a new file to be shared.
-        TODO: (Section 2.2)
+        The same client cannot offer the same file twice.
         """
-        # Tranformed Table Format:
-        # {
-        #   "filename": [{
-        #       "owner": "client1",
-        #       "ip_address": localhost,
-        #       "tcp_port": 1234
-        #       }, { // another client offering the same file }
-        #   ],
-        #   "filename2": [{ ... }, { ... }]
-        #   }
-        transformed_table = dict()
+        # Add the file to the client's list of files in the server's registration table.
+        if file_name not in self.table[client_address]["files"]:
+            self.table[client_address]["files"].add(file_name)
 
-        # Format the tracker table to the transformed table to send to clients.
-        # This format allows clients to query by a filename.
-        for client_name, client_info in self.table.items():
-            contact_info = {
-                "owner": client_name,
-                "ip_address": client_info["client_ip"],
-                "tcp_port": client_info["client_tcp_port"]
-            }
+            # Add the file to the client table view.
+            self.client_table_view[file_name] = {
+                "client_name": self.table[client_address]["name"],
+                "ip_address": client_address[0],
+                "tcp_port": self.table[client_address]["client_tcp_port"]
+                }
+        return
 
-            for file in client_info["files"]:
-                if file not in transformed_table.keys():
-                    transformed_table[file] = [contact_info, ]
-                else:
-                    transformed_table[file].append(contact_info)
+    # def get_transformed_table(self):
+    #     """
+    #     Returns a transformed version of the table intended to be sent to clients.
 
-        return transformed_table
+    #     The transformed table is a dictionary of all the filenames offered by clients along with the client name of the
+    #     file owner, the IPaddress and the TCP port number at which each file can be requested.
+
+    #     This allows the registered client to initialize its local table. This transformed
+    #     version of the table is also broadcasted whenever a client offers a new file to be shared.
+    #     TODO: (Section 2.2)
+    #     maybe don't re-generate this every time there's an update? the methods can edit the
+    #     global tranformed table directly.
+    #     """
+    #     # Tranformed Table Format:
+    #     # {
+    #     #   "filename": [{
+    #     #       "ip_address": localhost,
+    #     #       "tcp_port": 1234
+    #     #       }, { // another client offering the same file }
+    #     #   ],
+    #     #   "filename2": [{ ... }, { ... }]
+    #     #   }
+    #     transformed_table = dict()
+
+    #     # Format the tracker table to the transformed table to send to clients.
+    #     # This format allows clients to query by a filename.
+    #     for client_address, client_info in self.table.items():
+    #         contact_info = {
+    #             "owner": client_info,
+    #             "ip_address": client_info["client_ip"],
+    #             "tcp_port": client_info["client_tcp_port"]
+    #         }
+
+    #         for file in client_info["files"]:
+    #             if file not in transformed_table.keys():
+    #                 transformed_table[(file, ) ] = [contact_info, ]
+    #             else:
+    #                 transformed_table[file].append(contact_info)
+
+    #     return transformed_table
     
     def listen_for_requests(self):
         """
@@ -419,7 +465,7 @@ class FileServer:
                 if client_address not in self.table.keys():
                     self.register_clients(message, client_address)
                 else:
-                    self.handle_client_offer(message)
+                    self.handle_client_offer(message, client_address)
             except KeyboardInterrupt: 
                 # Close the server socket upon program termination
                 # so it can be reused for future FileServer sessions.
@@ -436,8 +482,6 @@ class FileServer:
 
         # Receive the registration request from the client
         # Format: <name>, <client_udp_port>,<client_tcp_port>
-        # message, client_address = self.server_socket.recvfrom(
-        #     BUFFER_SIZE)
         print(f"!!registration request from {client_address}: {message.decode()}")
         name, client_tcp_port = message.decode().split(",")
 
@@ -459,7 +503,6 @@ class FileServer:
         )
 
         # When a client successfully registers, the server sends the client a transformed version of the table
-        transformed_table = self.get_transformed_table()
 
         # Continue if ACK received.
         # TODO: error handling
@@ -467,11 +510,11 @@ class FileServer:
         #  - what do we resend when we retry?  welcome message and table or just table?
         # If the server does not receive an ack from the client within 500 msecs, it
         # should adopt a best effort approach by retrying 2 times.
-        # self.server_socket.settimeout(0.5)
+        self.server_socket.settimeout(0.5)
         for _ in range(MAX_RETRIES + 1):  # +1 because the first try is not a retry.
             # Send the transformed table to the client.
             self.server_socket.sendto(
-                str(transformed_table).encode(), client_address
+                str(self.client_table_view).encode(), client_address
             )
 
             try:
@@ -491,31 +534,43 @@ class FileServer:
 
         return
     
-    def listen_for_offers(self):
+    def handle_client_offer(self, message, client_address):
         """
-        Listens for UDP messages from clients offering files to be shared.
+        Handles the file sharing request from a client. 
+        The following steps are performed:
+        1. The server receives the file sharing request from the client.
+        2. The server's client info table will be updated with the new file information.
+        3. The server will send a transformed version of the table to all the registered clients.
+        To save on bandwidth, inactive clients will be ignored.
+
+
         """
-        while True:
-            try:
-                # Receive the offer from the client
-                # Format: <name>, <filename>
-                message, client_address = self.server_socket.recvfrom(
-                    BUFFER_SIZE)
-                print(">>> [Offer Message Received By Server]")
-                print(f"client address: {client_address}")
-                print(f"!!offer received: {message.decode()}")
-                name, filename = message.decode().split(",")
+        # Receive the offer from the client
+        # Format: <name>, <filename>
+        print(">>> [Offer Message Received By Server]")
+        print(f"!!offer received: {message.decode()} from {client_address}")
+        file_list = json.loads(message)
+        print(f"!!file list: {file_list}")
 
-                # Add the file to the client's list of files.
-                self.table[name]["files"].append(filename)
+        # Send an ACK to the client.
+        self.server_socket.sendto("ACK".encode(), client_address)
 
-                # When a client offers a new file to be shared, the server sends a transformed version of the table
-                # to all the registered clients.
-                transformed_table = self.get_transformed_table()
+        # Add the file to the client's list of files.
+        # Because files is a set, duplicate file offerings
+        # by the same client will be ignored.
+        for file in file_list:
+            self.add_file(client_address=client_address, file_name=file)
+        
+        # When a client offers a new file to be shared, the server sends a transformed version of the table
+        # to all the registered clients.
+        for client_address in self.table:
+            # send the transformed table to the client.
+            pass
+        print(f"!!current table: {self.table}")
 
-                # Continue if ACK received.
-            except:
-                pass
+
+        # Continue if ACK received.
+        
         return
 
     def get_client_info(self):
