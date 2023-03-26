@@ -120,7 +120,7 @@ class FileClient:
                     if len(args) != 1:
                         print(">>> [Usage: setdir <dir>.]")
                     else:
-                        dir_set = self.set_dir(args[0])
+                        dir_set = self.set_dir(dir_name=args[0])
                 elif command == "offer":
                     if not dir_set:
                         print(
@@ -132,13 +132,18 @@ class FileClient:
                                 f">>> [Please provide files to offer from {self.dir}.]"
                             )
                         else:
-                            self.offer_file(args)
+                            self.offer_file(file_list=args)
                 elif command == "list":
+                    if len(args) != 0:
+                        print(">>> [Warning: list does not take any arguments]")
                     self.list_files()
                 elif command == "request":
-                    self.request_file(file_name=args[0], client=args[1])
-                elif command == "get":
-                    self.get_file()
+                    if len(args) != 2:
+                        print(
+                            ">>> [Usage: request <file_name> <client_name>. Please try again.]"
+                        )
+                    else:
+                        self.request_file(file_name=args[0], peer_name=args[1])
                 elif command == "deregister":
                     self.deregister()
                 elif command == "exit":
@@ -220,7 +225,7 @@ class FileClient:
                 with open(file_path, "rb") as f:
                     while True:
                         bytes_read = f.read(BUFFER_SIZE)
-                        print(f"bytes_read: {bytes_read.decode()}")
+                        print(f"!!bytes_read: {bytes_read.decode()}")
                         if not bytes_read:
                             print(f"!!! Client {self.name} finished sending {file_request}")
                             break
@@ -233,7 +238,7 @@ class FileClient:
                 print(f"< Connection with client {requester_name} closed. >")
                 connection_socket.close()
             except:
-                # TODO: This isn't printing for some reason.
+                # TODO: This is
                 print(
                     f"!!! Client {self.name} left silently - listen_for_file_requests"
                 )
@@ -338,7 +343,7 @@ class FileClient:
         )
         return
 
-    def request_file(self, file_name, client):
+    def request_file(self, file_name, peer_name):
         """
         Sends a TCP message to the client to request the file.
 
@@ -348,18 +353,18 @@ class FileClient:
         # The client should not attempt to establish a TCP connection
         # if client is itself or if the client does not have the file.
         if (
-            client == self.name
-            or (str(file_name) + "," + str(client)) not in self.local_table
+            peer_name == self.name
+            or (str(file_name) + "," + str(peer_name)) not in self.local_table
         ):
             print(f"< Invalid Request >")
             return
 
         # Establish a TCP connection with the client.
-        peer_ip = self.local_table[str(file_name) + "," + str(client)][0]
-        peer_tcp_port = self.local_table[str(file_name) + "," + str(client)][1]
+        peer_ip = self.local_table[str(file_name) + "," + str(peer_name)][0]
+        peer_tcp_port = self.local_table[str(file_name) + "," + str(peer_name)][1]
         # self.client_request_file_socket = socket(AF_INET, SOCK_STREAM)
         self.client_request_file_socket.connect((peer_ip, peer_tcp_port))
-        print(f"< Connection with client {client} established. >")
+        print(f"< Connection with client {peer_name} established. >")
 
         # Send the file name and name of the client to the client.
         # TODO: Don't send the name.
@@ -376,17 +381,18 @@ class FileClient:
         with open(file_name, "wb") as f:
             while True:
                 bytes_read = self.client_request_file_socket.recv(BUFFER_SIZE)
+                print(f"!!received {bytes_read.decode()}")
                 if not bytes_read:
                     # File transfer is done because nothing is received.
                     break
-            f.write(bytes_read)
+                f.write(bytes_read)
         
         print(f"< {file_name} downloaded successfully! >")
 
         # Close the TCP connection.
         # TODO: will this fuck up future requests?
         self.client_request_file_socket.close()
-        print(f"< Connection with client {client} closed. >")
+        print(f"< Connection with client {peer_name} closed. >")
 
         return
 
