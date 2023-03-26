@@ -111,9 +111,10 @@ class FileClient:
                 args = command_args[1:]
 
                 if command == "setdir":
-                    # Assumes that the directory name is the first argument.
-                    # TODO: include error handling for no arguments/more than one argument.
-                    dir_set = self.set_dir(args[0])
+                    if len(args) != 1:
+                        print(">>> [Usage: setdir <dir>.]")
+                    else:
+                        dir_set = self.set_dir(args[0])
                 elif command == "offer":
                     if not dir_set:
                         print(">>> [Please set a directory first. Usage: setdir <dir>.]")
@@ -217,7 +218,12 @@ class FileClient:
         containing the list of files that the client is offering.
 
         """
-        print(f"files offered: {file_list}")
+        print(f"!!!files offered: {file_list}")
+        # Check if the files exist in the directory.
+        for file_name in file_list:
+            if not os.path.isfile(os.path.join(self.dir, file_name)):
+                print(f">>> [Offer failed: {file_name} does not exist in {self.dir}.]")
+                return
 
         # Client must wait for an ack from the server that it has
         # successfully received the file offerings.
