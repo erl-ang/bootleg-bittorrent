@@ -1,0 +1,263 @@
+===============================================================
+						REGISTRATION TESTS
+===============================================================
+TEST 1: Client successfully registers with an available username
+===============================================================
+
+$ python3 ChatApp.py -c heyy 0.0.0.0 1025 1026 1027 | tee text.txt
+===============
+Printing args:
+server False
+client True
+name heyy
+server-ip 0.0.0.0
+server-port 1025
+client-udp-port 1026
+client-tcp-port 1027
+===============
+>>> [Welcome, You are registered.]
+>>> [Client table updated.]
+>>> ^C (heyy silently left)
+
+TEST 2: Server rejects registration request with a username already
+taken by another client. 
+===============================================================
+$  python3 ChatApp.py -c heyy 0.0.0.0 1025 1029 1030
+===============
+Printing args:
+server False
+client True
+name heyy
+server-ip 0.0.0.0
+server-port 1025
+client-udp-port 1029
+client-tcp-port 1030
+===============
+Client heyy already registered. Registration rejected.
+
+TEST 3: Upon successful registration, the client's local table is
+initialized.
+===============================================================
+$ python3 ChatApp.py -c heyy 0.0.0.0 1025 1029 1030
+===============
+Printing args:
+server False
+client True
+name heyy
+server-ip 0.0.0.0
+server-port 1025
+client-udp-port 1029
+client-tcp-port 1030
+===============
+>>> [Welcome, You are registered.]
+[DEBUG] LOCAL TABLE: {}
+>>> 
+
+TEST 4: Server retries sending the table of offered files a max of 2
+times when the client ack is not received within 500 ms. Test
+by never sending the registration ack to the server. Check the
+readME for more information about the client view.
+
+Server view:
+===============
+Printing args:
+server True
+client False
+port 1025
+===============
+[DEBUG] message from ('127.0.0.1', 1029): heyy,1030
+[DEBUG] Sending table again...
+[DEBUG] Sending table again...
+[DEBUG] Sending table again...
+
+===============================================================
+					FILE OFFERING TESTS
+===============================================================
+TEST setdir: given an invalid directory, the client program doesn’t
+crash and an appropriate error message is printed. offer command should fail
+with an appropriate error message if no setdir command has succeeded.
+===============================================================
+
+Client view:
+>>> [Welcome, You are registered.]
+>>> setdir fakedir
+>>> [setdir failed: fakedir does not exist.]
+>>> offer should_fail.txt
+>>> [Please set a directory first. Usage: setdir <dir>.]
+>>> offer i_love_the_tas.txt
+>>> [Offer Message received by Server.]
+>>> [Client table updated.]
+
+TEST offer: works for single and multiple (e.g. 3) filename argument(s).
+===============================================================
+>>> offer hello.txt jjs.jpg i_love_the_tas.txt
+>>> [Offer Message received by Server.]
+>>> [Client table updated.]
+
+
+For the server broadcast test, see the readme.
+
+===============================================================
+					FILE LISTING TESTS
+===============================================================
+TEST 1: Listing the correct file offerings using the table
+(with proper formatting)
+===============================================================
+- on any one of the client terminals, after client3 has also offered jjs.jpg
+>>> list
+FILENAME  OWNER    IP ADDRESS  TCP PORT 
+jjs.jpg   heyy     127.0.0.1   1030     
+jjs.jpg   client3  127.0.0.1   1033     
+wee.txt   heyy     127.0.0.1   1030
+
+TEST 2: Proper message when no files are being offered
+===============================================================
+- 1 client 1 server, client lists right after a successful registration
+
+>>> [Welcome, You are registered.]
+>>> list
+>>> [No files available for download at the moment.]
+
+TEST 3: File updated when client table updated 
+===============================================================
+- client 1 offers three files and lists them
+
+note that the prompt messages get messed up slightly when the client threads
+are both waiting for user input and receiving updates from the server’s broadcasts.
+
+$ python3 ChatApp.py -c heyy 0.0.0.0 1025 1029 1030   
+===============
+Printing args:
+server False
+client True
+name heyy
+server-ip 0.0.0.0
+server-port 1025
+client-udp-port 1029
+client-tcp-port 1030
+===============
+>>> [Welcome, You are registered.]
+>>> [Client table updated.]
+>>> setdir dir
+>>> [Successfully set dir as the directory for searching offered files.]
+>>> offer jjs.jpg jjs.jpg 1.txt 2.txt            
+>>> [Offer Message received by Server.]
+>>> >>> [Client table updated.]
+list
+ FILENAME  OWNER  IP ADDRESS  TCP PORT 
+ 1.txt     heyy   127.0.0.1   1030     
+ 2.txt     heyy   127.0.0.1   1030     
+ jjs.jpg   heyy   127.0.0.1   1030     
+>>> >>> [Client table updated.]
+
+- client 2 joins and lists the files
+$ python3 ChatApp.py -c waa 0.0.0.0 1025 1028 1031
+===============
+Printing args:
+server False
+client True
+name waa
+server-ip 0.0.0.0
+server-port 1025
+client-udp-port 1028
+client-tcp-port 1031
+===============
+>>> [Welcome, You are registered.]
+>>> [Client table updated.]
+>>> list     
+ FILENAME  OWNER  IP ADDRESS  TCP PORT 
+ 1.txt     heyy   127.0.0.1   1030     
+ 2.txt     heyy   127.0.0.1   1030     
+ jjs.jpg   heyy   127.0.0.1   1030
+
+ - client 2 offers some more files
+ >>> setdir 3.txt
+>>> [setdir failed: 3.txt does not exist.]
+>>> setdir dir
+>>> [Successfully set dir as the directory for searching offered files.]
+>>> offer 3.txt 4.txt 5.txt hello.txt jjs.jpg wee.txt
+>>> [Offer Message received by Server.]
+>>> >>> [Client table updated.]
+
+- both clients list the files
+>>> [Client table updated.]
+>>> list
+ FILENAME            OWNER  IP ADDRESS  TCP PORT 
+ 1.txt               heyy   127.0.0.1   1030     
+ 2.txt               heyy   127.0.0.1   1030     
+ 3.txt               waa    127.0.0.1   1031     
+ 4.txt               waa    127.0.0.1   1031     
+ 5.txt               waa    127.0.0.1   1031     
+ hello.txt           waa    127.0.0.1   1031     
+ i_love_the_tas.txt  waa    127.0.0.1   1031     
+ jjs.jpg             heyy   127.0.0.1   1030     
+ jjs.jpg             waa    127.0.0.1   1031     
+ wee.txt             waa    127.0.0.1   1031
+
+
+ ===============================================================
+					FILE TRANSFER TESTS
+===============================================================
+TEST 1: Client can successfully request and receive a file offered by another client.
+The received file content should be exactly the same as that of the offered file of the host.
+===============================================================
+- from the previous session with 2 clients and a lot of files:
+- client `waa` requests `1.txt` from `heyy`
+
+# client waa terminal
+>>> request 1.txt heyy
+< Connection with client heyy established. >
+< Downloading 1.txt... >
+< 1.txt downloaded successfully! >
+< Connection with client heyy closed. >
+
+# client heyy terminal
+>>> 
+< Accepting connection request from 127.0.0.1 >
+< Transferring 1.txt... >
+< 1.txt transferred successfully! >
+< Connection with client waa closed. >
+...
+- 1.txt with associated contents
+now appears in the working directory of ChatApp.py
+
+TEST 2: Appropriate status messages should be printed at critical points
+of the file transfer, similar to the example provided in the specification.
+===============================================================
+- see above test case
+
+TEST 3: An appropriate error message should be printed when the client tries to
+request a non-existent file or a file from an incorrect client
+===============================================================
+- client waa requesting a non-existent file
+
+>>> request this_doesnt_exist heyy
+< Invalid Request >
+- from an incorrect client
+>>> request 1.txt wee
+< Invalid Request >
+
+ ===============================================================
+					DEREGISTRATION TESTS
+===============================================================
+TEST 1: dereg command de-registers the client without exiting the client program.
+===============================================================
+- waa deregisters
+
+>>> dereg waa
+# No output printed, program hangs until interrupted with ctrl+c
+
+TEST 2: ### When a client dereg’ed after offering file(s), the server
+ should broadcast the updated table of offered files to other active clients.
+ Upon receiving the broadcasted table, active clients should output appropriate
+ status messages to indicate that its local table has been updated.
+===============================================================
+- continued from above test
+- client `heyy` terminal:
+
+>>> [Client table updated.]
+list
+FILENAME  OWNER  IP ADDRESS  TCP PORT 
+1.txt     heyy   127.0.0.1   1030     
+2.txt     heyy   127.0.0.1   1030     
+jjs.jpg   heyy   127.0.0.1   1030
