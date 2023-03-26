@@ -79,11 +79,11 @@ class FileClient:
         # 1. client_udp_socket: For sending UDP messages to the server. This socket is also used
         #    for listening for UDP messages from the server.
         # 2. client_tcp_socket: For listening for TCP connection requests from other clients
-        # 3. client_request_socket: For sending TCP file requests to other clients
+        # 3. client_request_socket: For sending TCP file requests to other clients.
         self.client_udp_socket = socket(AF_INET, SOCK_DGRAM)
         self.client_udp_socket.bind(("", self.client_udp_port))
         self.client_tcp_socket = socket(AF_INET, SOCK_STREAM)
-        self.client_request_socket.bind(("", self.client_tcp_port))
+        self.client_request_file_socket = socket(AF_INET, SOCK_STREAM)
 
         # The client has to both listen to incoming server
         # updates and ACKs from the server to make sure that
@@ -190,8 +190,9 @@ class FileClient:
 
     def listen_for_file_requests(self):
         """
-        The client will listen for TCP messages from other clients
+        The client will listen for TCP file requests from other clients
         on the client_tcp_port.
+
 
         Note that the client acts as a server to the other clients.
         """
@@ -203,12 +204,34 @@ class FileClient:
 
         while True:
             try:
+                # Receive a TCP connection request from another client.
                 connection_socket, client_address = self.client_tcp_socket.accept()
                 print(
-                    f"!!! Client {self.name} received a TCP connection request from {client_address}"
+                    f"< Accepting connection request from {client_address[0]} >"
                 )
-                # TODO: handle message
-                # connection_socket.close()
+
+                # To send the requested file to the client, the following steps are taken:
+                # 1. Receive the file name from the client.
+                # 2. Open the file and send it to the client.
+                file_request, requester_name = connection_socket.recv(BUFFER_SIZE).decode().split(",")
+                file_path = os.path.join(self.dir, file_request)
+                print(f"< Transferring {file_request}... >")
+
+                with open(file_path, "rb") as f:
+                    while True:
+                        bytes_read = f.read(BUFFER_SIZE)
+                        print(f"bytes_read: {bytes_read.decode()}")
+                        if not bytes_read:
+                            print(f"!!! Client {self.name} finished sending {file_request}")
+                            break
+
+                        # Use sendall to ensure that the entire file is sent.
+                        # send() may send less bytes than requested.
+                        connection_socket.sendall(bytes_read)
+                
+                print(f"< {file_request} transferred successfully! >")
+                print(f"< Connection with client {requester_name} closed. >")
+                connection_socket.close()
             except:
                 # TODO: This isn't printing for some reason.
                 print(
@@ -332,14 +355,37 @@ class FileClient:
             return
 
         # Establish a TCP connection with the client.
-
+        peer_ip = self.local_table[str(file_name) + "," + str(client)][0]
+        peer_tcp_port = self.local_table[str(file_name) + "," + str(client)][1]
+        # self.client_request_file_socket = socket(AF_INET, SOCK_STREAM)
+        self.client_request_file_socket.connect((peer_ip, peer_tcp_port))
         print(f"< Connection with client {client} established. >")
-        print(f"< Downloading {file_name}... >")
-        # For simplicity, the client stores the requested file under the
-        # starting directory in which the client is running.
 
+        # Send the file name and name of the client to the client.
+        # TODO: Don't send the name.
+        # Sending the name is only necessary for the client serving
+        # the request to print out transfer messages that correspond with the
+        # reference behavior (without having to scan its local table)
+        file_request = str(file_name) + "," + str(self.name)
+        self.client_request_file_socket.send(file_request.encode())
+
+        
+        # Download the file. For simplicity, the client stores the requested file under the
+        # starting directory in which the client is running.
+        print(f"< Downloading {file_name}... >")
+        with open(file_name, "wb") as f:
+            while True:
+                bytes_read = self.client_request_file_socket.recv(BUFFER_SIZE)
+                if not bytes_read:
+                    # File transfer is done because nothing is received.
+                    break
+            f.write(bytes_read)
+        
         print(f"< {file_name} downloaded successfully! >")
 
+        # Close the TCP connection.
+        # TODO: will this fuck up future requests?
+        self.client_request_file_socket.close()
         print(f"< Connection with client {client} closed. >")
 
         return
