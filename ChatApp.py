@@ -210,14 +210,14 @@ class FileClient:
             try:
                 # Receive a TCP connection request from another client.
                 connection_socket, client_address = self.client_tcp_socket.accept()
-                print(
-                    f"< Accepting connection request from {client_address[0]} >"
-                )
+                print(f"< Accepting connection request from {client_address[0]} >")
 
                 # To send the requested file to the client, the following steps are taken:
                 # 1. Receive the file name from the client.
                 # 2. Open the file and send it to the client.
-                file_request, requester_name = connection_socket.recv(BUFFER_SIZE).decode().split(",")
+                file_request, requester_name = (
+                    connection_socket.recv(BUFFER_SIZE).decode().split(",")
+                )
                 file_path = os.path.join(self.dir, file_request)
                 print(f"< Transferring {file_request}... >")
 
@@ -226,13 +226,15 @@ class FileClient:
                         bytes_read = f.read(BUFFER_SIZE)
                         # print(f"!!bytes_read: {bytes_read.decode()}")
                         if not bytes_read:
-                            print(f"!!! Client {self.name} finished sending {file_request}")
+                            print(
+                                f"!!! Client {self.name} finished sending {file_request}"
+                            )
                             break
 
                         # Use sendall to ensure that the entire file is sent.
                         # send() may send less bytes than requested.
                         connection_socket.sendall(bytes_read)
-                
+
                 print(f"< {file_request} transferred successfully! >")
                 print(f"< Connection with client {requester_name} closed. >")
                 connection_socket.close()
@@ -373,7 +375,6 @@ class FileClient:
         file_request = str(file_name) + "," + str(self.name)
         self.client_request_file_socket.send(file_request.encode())
 
-        
         # Download the file. For simplicity, the client stores the requested file under the
         # starting directory in which the client is running.
         print(f"< Downloading {file_name}... >")
@@ -385,7 +386,7 @@ class FileClient:
                     # File transfer is done because nothing is received.
                     break
                 f.write(bytes_read)
-        
+
         print(f"< {file_name} downloaded successfully! >")
 
         # Close the TCP connection.
