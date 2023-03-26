@@ -12,6 +12,7 @@ import queue
 import json
 import operator
 from prettytable import PrettyTable
+import sys
 
 """
 GENERAL UTILITIES
@@ -74,6 +75,7 @@ class FileClient:
         self.server_port = server_port
         self.client_udp_port = client_udp_port
         self.client_tcp_port = client_tcp_port
+        self.deregistered = False
 
         # The client has three sockets:
         # 1. client_udp_socket: For sending UDP messages to the server. This socket is also used
@@ -91,7 +93,8 @@ class FileClient:
         # Because they are both recving from the same UDP port,
         # the thread listening for the update might get the ACK
         # or the thread listening for the ACK might get the update.
-        self.work_queue = queue.Queue()
+        self.offer_ack_queue = queue.Queue()
+        self.dereg_ack_queue = queue.Queue()
 
         self.local_table = dict()
         self.dir = None
@@ -116,12 +119,12 @@ class FileClient:
                 command = command_args[0]
                 args = command_args[1:]
 
-                if command == "setdir":
+                if command == "setdir" and not self.deregistered:
                     if len(args) != 1:
                         print(">>> [Usage: setdir <dir>.]")
                     else:
                         dir_set = self.set_dir(dir_name=args[0])
-                elif command == "offer":
+                elif command == "offer" and not self.deregistered:
                     if not dir_set:
                         print(
                             ">>> [Please set a directory first. Usage: setdir <dir>.]"
@@ -137,18 +140,14 @@ class FileClient:
                     if len(args) != 0:
                         print(">>> [Warning: list does not take any arguments]")
                     self.list_files()
-                elif command == "request":
+                elif command == "request" and not self.deregistered:
                     if len(args) != 2:
-                        print(
-                            ">>> [Usage: request <file_name> <client_name>.]"
-                        )
+                        print(">>> [Usage: request <file_name> <client_name>.]")
                     else:
                         self.request_file(file_name=args[0], peer_name=args[1])
-                elif command == "deregister":
+                elif command == "dereg" and not self.deregistered:
                     if len(args) != 1:
-                        print(
-                            ">>> [Usage: deregister <nick-name>.]"
-                        )
+                        print(">>> [Usage: deregister <nick-name>.]")
                     else:
                         self.deregister(name=args[0])
                 else:
@@ -176,13 +175,20 @@ class FileClient:
         while True:
             try:
                 message, server_address = self.client_udp_socket.recvfrom(BUFFER_SIZE)
-                if (
-                    message.decode() == "ACK"
-                ):  # Message was not meant for this thread. Put it in the queue.
+                # If the messages are ACKs, the client will put them in the corresponding
+                # queue. Otherwise, the message is a server broadcast, in which case the
+                # client will update its local table.
+                if message.decode() == "ACK_OFFER":
+                    self.client_udp_socket.settimeout(
+                        None
+                    )  # Reset the timeout so that the client can receive table updates.
+                    self.offer_ack_queue.put(message.decode())
+                elif message.decode() == "ACK_DEREG":
                     self.client_udp_socket.settimeout(None)
-                    self.work_queue.put(message.decode())
-                else:  # The client received a broadcast table update from the server.
+                    self.dereg_ack_queue.put(message.decode())
+                else:
                     self.local_table = json.loads(message)
+                    print(">>> [Client table updated.]")
                 print(f"!!!message: {message.decode()}")
             except Exception as e:
                 print(f"!! {e}")
@@ -212,7 +218,7 @@ class FileClient:
             try:
                 # Receive a TCP connection request from another client.
                 connection_socket, client_address = self.client_tcp_socket.accept()
-                print(f"< Accepting connection request from {client_address[0]} >")
+                print(f"\n< Accepting connection request from {client_address[0]} >")
 
                 # To send the requested file to the client, the following steps are taken:
                 # 1. Receive the file name from the client.
@@ -280,7 +286,7 @@ class FileClient:
         # If the ack times out, the client will retry two times.
         offer_acked = False
 
-        # The listen_for_server_updates thread will be listening for the ack.
+        # The listen_for_server_updates thread will be listening for the ack
         # but does not know how long to wait for the ack.
         self.client_udp_socket.settimeout(0.5)
         for _ in range(MAX_RETRIES + 1):  # +1 because the first try is not a retry
@@ -292,13 +298,10 @@ class FileClient:
             try:
                 # If there is an ack available, the listen_for_server_updates
                 # thread will put the ack in the queue.
-                ack = self.work_queue.get()
-                if ack == "ACK":
-                    print(f">>> [Offer Message received by Server.]")
-                    offer_acked = True
-                    break
-                else:
-                    continue
+                ack = self.offer_ack_queue.get()
+                print(f">>> [Offer Message received by Server.]")
+                offer_acked = True
+                break
             except queue.Empty:  # Try again.
                 print("!!! Trying again")
                 continue
@@ -309,7 +312,7 @@ class FileClient:
         if not offer_acked:
             print(">>> [No ACK from Server, please try again later.]")
 
-        self.client_udp_socket.settimeout(None)
+        # self.client_udp_socket.settimeout(None)
         return
 
     def list_files(self):
@@ -439,23 +442,49 @@ class FileClient:
         When a client is about to go offline, it immediately stops listening and ignores
         incoming requests on the TCP port for incoming file requests.
         """
+        # Check if name is the same as the client's name.
+        if name != self.name:
+            print(f">>> [Deregister failed: name does not match.]")
+            return
+
         # Ignore incoming requests on the TCP port. We should also
         # not be requesting any more files from other clients.
         self.client_tcp_socket.close()
         self.client_request_file_socket.close()
 
-        # Notify de-registration action to the server.
-        # TODO: server needs to detect and the client status should be changed to offline.
-        dereg_message = "dereg {name}"
-        self.client_udp_socket.sendto(
-            dereg_message.encode(), (self.server_ip, self.server_port)
-        )
+        # Notify de-registration action to the server. The client has to wait
+        # for an ack from the server within 500 msecs. If it does not receive
+        # an ack, it should retry for 2 times.
+        dereg_acked = False
 
-        self.client_udp_socket.close()
-        # TODO: close TCP socket?
+        # The listen_for_server_updates thread will be listening for the ack
+        # but does not know how long to wait for the ack.
+        self.client_udp_socket.settimeout(0.5)
+        for _ in range(MAX_RETRIES + 1):  # +1 because the first try is not a retry
+            self.client_udp_socket.sendto(
+                "DEREG".encode(), (self.server_ip, self.server_port)
+            )
+            try:
+                # If there is an ack available, the listen_for_server_updates()
+                # thread will put the ack in the queue.
+                ack = self.dereg_ack_queue.get()
+                dereg_acked = True
+                break
+            except queue.Empty:  # Try again.
+                print("!!Trying again")
+                continue
 
+        # If the client has not received an ack after two retries, the client program should terminate.
+        if not dereg_acked:
+            print(f" >>> [Server not responding]")
+            print(f" >>> [Exiting]")
+            self.client_udp_socket.close()
+            sys.exit(0)
+
+        # Complete the deregistration process.
+        self.deregistered = True
         print(">>> [You are now Offline. Bye.]")
-        pass
+        return
 
 
 """
@@ -578,6 +607,7 @@ class FileServer:
         The server needs to differentiate between the following types of requests:
         1. Registration request from a client
         2. File sharing request from a client
+        3. De-registration request from a client
         """
         while True:
             message, client_address = self.server_socket.recvfrom(BUFFER_SIZE)
@@ -586,7 +616,10 @@ class FileServer:
             if client_address not in self.table.keys():
                 self.register_clients(message, client_address)
             else:
-                self.handle_client_offer(message, client_address)
+                if message.decode() == "DEREG":
+                    self.handle_deregistration(client_address)
+                else:
+                    self.handle_client_offer(message, client_address)
             # except KeyboardInterrupt:
             #     # Close the server socket upon program termination
             #     # so it can be reused for future FileServer sessions.
@@ -648,6 +681,43 @@ class FileServer:
 
         # Reset timeout to None so that it doesn't affect the next client.
         self.server_socket.settimeout(None)
+        return
+
+    def handle_deregistration(self, client_address):
+        """
+        Handles the de-registration request from a client.
+
+        The server must change the status of the client to offline
+        and mark any file offerings as temproarily unavailable until
+        the client logs back in again. The updated file offerings
+        will be broadcasted to all the active clients.
+        """
+        print(">>> [Deregistration Request for {client_address} Received By Server.]")
+
+        # Send ack to client to confirm de-registration.
+        self.server_socket.sendto("ACK_DEREG".encode(), client_address)
+
+        # Change client to offline status and update the client table.
+        # Because reregistration is not supported, the client's file offerings
+        # will be removed from the table instead of being marked as temporarily unavailable.
+        self.table[client_address]["status"] = "offline"
+        self.table[client_address]["files"] = set()
+
+        file_client_info_to_delete = []
+        for file_client_info in self.client_table_view:
+            file_name, client_name = file_client_info.split(",")
+            if client_name == self.table[client_address]["name"]:
+                file_client_info_to_delete.append(file_client_info)
+
+        for file_client_info in file_client_info_to_delete:
+            del self.client_table_view[file_client_info]
+
+        # Send the updated table to all the active clients.
+        for client_address in self.table.keys():
+            if self.table[client_address]["status"] == "active":
+                self.server_socket.sendto(
+                    str.encode(json.dumps(self.client_table_view)), client_address
+                )
 
         return
 
@@ -659,18 +729,15 @@ class FileServer:
         2. The server's client info table will be updated with the new file information.
         3. The server will send a transformed version of the table to all the registered clients.
         To save on bandwidth, inactive clients will be ignored.
-
-
         """
         # Receive the offer from the client
         # Format: <name>, <filename>
         print(">>> [Offer Message Received By Server]")
-        print(f"!!offer received: {message.decode()} from {client_address}")
         file_list = json.loads(message)
-        print(f"!!file list: {file_list}")
+        print(f"!!offer of files: {file_list} received from {client_address}")
 
         # Send an ACK to the client.
-        self.server_socket.sendto("ACK".encode(), client_address)
+        self.server_socket.sendto("ACK_OFFER".encode(), client_address)
 
         # Add the file to the client's list of files.
         # Because files is a set, duplicate file offerings
@@ -681,8 +748,12 @@ class FileServer:
         # When a client offers a new file to be shared, the server sends a transformed version of the table
         # to all the registered clients.
         # Remove inactive clients from the client table view.
+        # TODO: this is not necessary because the client will be removed from the table
+        # when it sends a deregistration request.
+        # this part won't execute anyway
         for client_file_offer in self.client_table_view:
             if self.table[client_address]["status"] != "active":
+                print("This should not be happening.")
                 self.client_table_view.pop(client_file_offer, "!!Already deleted")
 
         print(f"!!current table: {self.table}")
@@ -690,23 +761,15 @@ class FileServer:
 
         # Broadcast the transformed table to all the registered clients.
         for client_address in self.table.keys():
+            # TODO: don't think this is necessary to check for active clients.
+            # If the client notifies the server that it is offline, the
+            # entry will be removed from the table.
             if self.table[client_address]["status"] == "active":
                 self.server_socket.sendto(
                     str.encode(json.dumps(self.client_table_view)), client_address
                 )
-                print(f"!!sent table to {client_address}")
-
-        # Continue if ACK received.
 
         return
-
-    def get_client_info(self):
-        """
-        Returns the table with the nick-names of all the clients,
-        their status, the files that they're sharing, their IP addresses,
-        and port numbers for other clients to connect to
-        """
-        pass
 
 
 def main():
