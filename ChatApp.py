@@ -140,15 +140,17 @@ class FileClient:
                 elif command == "request":
                     if len(args) != 2:
                         print(
-                            ">>> [Usage: request <file_name> <client_name>. Please try again.]"
+                            ">>> [Usage: request <file_name> <client_name>.]"
                         )
                     else:
                         self.request_file(file_name=args[0], peer_name=args[1])
                 elif command == "deregister":
-                    self.deregister()
-                elif command == "exit":
-                    self.deregister()
-                    break
+                    if len(args) != 1:
+                        print(
+                            ">>> [Usage: deregister <nick-name>.]"
+                        )
+                    else:
+                        self.deregister(name=args[0])
                 else:
                     print(">>> [Invalid command. Please try again.]")
             except KeyboardInterrupt:
@@ -430,16 +432,21 @@ class FileClient:
         )
         return True
 
-    def deregister(self):
+    def deregister(self, name):
         """
         Send a de-registration request to the server to announce that it is going offline.
 
         When a client is about to go offline, it immediately stops listening and ignores
         incoming requests on the TCP port for incoming file requests.
         """
+        # Ignore incoming requests on the TCP port. We should also
+        # not be requesting any more files from other clients.
+        self.client_tcp_socket.close()
+        self.client_request_file_socket.close()
+
         # Notify de-registration action to the server.
         # TODO: server needs to detect and the client status should be changed to offline.
-        dereg_message = "dereg {self.name}"
+        dereg_message = "dereg {name}"
         self.client_udp_socket.sendto(
             dereg_message.encode(), (self.server_ip, self.server_port)
         )
