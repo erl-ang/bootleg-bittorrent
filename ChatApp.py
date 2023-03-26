@@ -291,16 +291,29 @@ class FileClient:
         return
         
         
-    def request_file(self, args):
+    def request_file(self, file_name, client):
         """
         Sends a TCP message to the client to request the file.
-        """
-        print(f"< Connection with client {file_owner} established. >")
-        print(f"< Downloading {file_name}... >")
-        print(f"< {file_name} downloaded successfully! >")
-        print(f"< Connection with client {file_owner} closed. >")
 
-        # TODO: deny file request
+        File transfers are done directly between clients and do not
+        involve the server.
+        """
+        # The client should not attempt to establish a TCP connection
+        # if client is itself or if the client does not have the file.
+        if client == self.name or (str(file_name) + "," + str(client)) not in self.local_table:
+            print(f"< Invalid Request >")
+            return
+        
+
+        print(f"< Connection with client {client} established. >")
+        print(f"< Downloading {file_name}... >")
+        # For simplicity, the client stores the requested file under the
+        # starting directory in which the client is running.
+
+        print(f"< {file_name} downloaded successfully! >")
+
+        print(f"< Connection with client {client} closed. >")
+
         return
 
     def register(self):
