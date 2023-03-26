@@ -75,9 +75,15 @@ class FileClient:
         self.client_udp_port = client_udp_port
         self.client_tcp_port = client_tcp_port
 
+        # The client has three sockets:
+        # 1. client_udp_socket: For sending UDP messages to the server. This socket is also used
+        #    for listening for UDP messages from the server.
+        # 2. client_tcp_socket: For listening for TCP connection requests from other clients
+        # 3. client_request_socket: For sending TCP file requests to other clients.
         self.client_udp_socket = socket(AF_INET, SOCK_DGRAM)
         self.client_udp_socket.bind(("", self.client_udp_port))
         self.client_tcp_socket = socket(AF_INET, SOCK_STREAM)
+        self.client_request_file_socket = socket(AF_INET, SOCK_STREAM)
 
         # The client has to both listen to incoming server
         # updates and ACKs from the server to make sure that
@@ -88,6 +94,7 @@ class FileClient:
         self.work_queue = queue.Queue()
 
         self.local_table = dict()
+        self.dir = None
         return
 
     def execute_commands(self):
@@ -110,18 +117,33 @@ class FileClient:
                 args = command_args[1:]
 
                 if command == "setdir":
-                    # Assumes that the directory name is the first argument.
-                    # TODO: include error handling for no arguments/more than one argument.
-                    dir_set = self.set_dir(args[0])
+                    if len(args) != 1:
+                        print(">>> [Usage: setdir <dir>.]")
+                    else:
+                        dir_set = self.set_dir(dir_name=args[0])
                 elif command == "offer":
                     if not dir_set:
-                        print(">>> [Please set a directory first. Usage: setdir <dir>.]")
+                        print(
+                            ">>> [Please set a directory first. Usage: setdir <dir>.]"
+                        )
                     else:
-                        self.offer_file(args)
+                        if len(args) == 0:
+                            print(
+                                f">>> [Please provide files to offer from {self.dir}.]"
+                            )
+                        else:
+                            self.offer_file(file_list=args)
                 elif command == "list":
+                    if len(args) != 0:
+                        print(">>> [Warning: list does not take any arguments]")
                     self.list_files()
-                elif command == "get":
-                    self.get_file()
+                elif command == "request":
+                    if len(args) != 2:
+                        print(
+                            ">>> [Usage: request <file_name> <client_name>. Please try again.]"
+                        )
+                    else:
+                        self.request_file(file_name=args[0], peer_name=args[1])
                 elif command == "deregister":
                     self.deregister()
                 elif command == "exit":
@@ -130,12 +152,11 @@ class FileClient:
                 else:
                     print(">>> [Invalid command. Please try again.]")
             except KeyboardInterrupt:
-                self.client_udp_socket.close()
                 print(f"!!! Client {self.name} left silently - execute_commands")
                 break
 
         return
-    
+
     def listen_for_server_updates(self):
         """
         The client will listen for UDP messages from the server
@@ -147,70 +168,108 @@ class FileClient:
         """
         # After going through the registration process, the client's udp socket
         # is already bound to the client_udp_port. So, we don't need to bind it again.
-        print(f"!!! Client {self.name} is listening for UDP messages on port {self.client_udp_port}...")
+        print(
+            f"!!! Client {self.name} is listening for UDP messages on port {self.client_udp_port}..."
+        )
         while True:
             try:
                 message, server_address = self.client_udp_socket.recvfrom(BUFFER_SIZE)
-                if message.decode() == "ACK": # Message was not meant for this thread. Put it in the queue.
+                if (
+                    message.decode() == "ACK"
+                ):  # Message was not meant for this thread. Put it in the queue.
                     self.client_udp_socket.settimeout(None)
                     self.work_queue.put(message.decode())
-                else: # The client received a broadcast table update from the server.
+                else:  # The client received a broadcast table update from the server.
                     self.local_table = json.loads(message)
                 print(f"!!!message: {message.decode()}")
             except Exception as e:
                 print(f"!! {e}")
 
-                self.client_udp_socket.close()
-                print(f"!!! Client {self.name} left silently - listen_for_server_updates")
+                # Sockets are cleaned up in the main thread exception handler.
+                print(
+                    f"!!! Client {self.name} left silently - listen_for_server_updates"
+                )
                 break
         return
-    
+
     def listen_for_file_requests(self):
         """
-        The client will listen for TCP messages from other clients
+        The client will listen for TCP file requests from other clients
         on the client_tcp_port.
+
 
         Note that the client acts as a server to the other clients.
         """
         self.client_tcp_socket.bind(("", self.client_tcp_port))
         self.client_tcp_socket.listen(1)
-        print(f"!!! Client {self.name} is listening for TCP connections on port {self.client_tcp_port}...")
+        print(
+            f"!!! Client {self.name} is listening for TCP connections on port {self.client_tcp_port}..."
+        )
 
         while True:
             try:
+                # Receive a TCP connection request from another client.
                 connection_socket, client_address = self.client_tcp_socket.accept()
-                print(f"!!! Client {self.name} received a TCP connection request from {client_address}")
-                # TODO: handle message
-                # connection_socket.close()
+                print(
+                    f"< Accepting connection request from {client_address[0]} >"
+                )
+
+                # To send the requested file to the client, the following steps are taken:
+                # 1. Receive the file name from the client.
+                # 2. Open the file and send it to the client.
+                file_request, requester_name = connection_socket.recv(BUFFER_SIZE).decode().split(",")
+                file_path = os.path.join(self.dir, file_request)
+                print(f"< Transferring {file_request}... >")
+
+                with open(file_path, "rb") as f:
+                    while True:
+                        bytes_read = f.read(BUFFER_SIZE)
+                        # print(f"!!bytes_read: {bytes_read.decode()}")
+                        if not bytes_read:
+                            print(f"!!! Client {self.name} finished sending {file_request}")
+                            break
+
+                        # Use sendall to ensure that the entire file is sent.
+                        # send() may send less bytes than requested.
+                        connection_socket.sendall(bytes_read)
+                
+                print(f"< {file_request} transferred successfully! >")
+                print(f"< Connection with client {requester_name} closed. >")
+                connection_socket.close()
             except:
-                # TODO: This isn't printing for some reason.
-                print(f"!!! Client {self.name} left silently - listen_for_file_requests")
+                # TODO: This is
+                print(
+                    f"!!! Client {self.name} left silently - listen_for_file_requests"
+                )
                 break
         return
 
-    
     def set_dir(self, dir_name):
         """
-        Section 2.2
-
         Sets the directory containing the files that the client is going to offer.
         """
         # Check for existence of the directory in the filesystem.
         if os.path.isdir(dir_name):
+            self.dir = dir_name
             print(
-                f">>> [Successfully set {dir_name} as the directory for searching offered files.]")
+                f">>> [Successfully set {dir_name} as the directory for searching offered files.]"
+            )
             return True
         else:
             print(f">>> [setdir failed: {dir_name} does not exist.]")
             return False
-    
+
     def offer_file(self, file_list):
         """
         The offer command sends a UDP message to the server
         containing the list of files that the client is offering.
-
         """
-        print(f"files offered: {file_list}")
+        print(f"!!!files offered: {file_list}")
+        # Check if the files exist in the directory.
+        for file_name in file_list:
+            if not os.path.isfile(os.path.join(self.dir, file_name)):
+                print(f">>> [Offer failed: {file_name} does not exist in {self.dir}.]")
+                return
 
         # Client must wait for an ack from the server that it has
         # successfully received the file offerings.
@@ -219,8 +278,8 @@ class FileClient:
 
         # The listen_for_server_updates thread will be listening for the ack.
         # but does not know how long to wait for the ack.
-        self.client_udp_socket.settimeout(0.5) 
-        for _ in range(MAX_RETRIES + 1): # +1 because the first try is not a retry
+        self.client_udp_socket.settimeout(0.5)
+        for _ in range(MAX_RETRIES + 1):  # +1 because the first try is not a retry
 
             # Send file offerings to the server.
             self.client_udp_socket.sendto(
@@ -236,19 +295,19 @@ class FileClient:
                     break
                 else:
                     continue
-            except queue.Empty: # Try again.
+            except queue.Empty:  # Try again.
                 print("!!! Trying again")
                 continue
-        
+
         # The server's ack might never reach the client if the server
         # is too busy at the moment or if there is a network partition
         # that prevents the client message from reaching the server.
         if not offer_acked:
             print(">>> [No ACK from Server, please try again later.]")
-        
+
         self.client_udp_socket.settimeout(None)
         return
-    
+
     def list_files(self):
         """
         Prints out the list of available file offerings by other clients.
@@ -258,7 +317,7 @@ class FileClient:
         # No file offerings are available.
         if len(self.local_table) == 0:
             print(">>> [No files available for download at the moment.]")
-        
+
         # Create the formatted table using pretty table.
         formatted_table = PrettyTable(border=False, hrules=False)
         formatted_table.field_names = ["FILENAME", "OWNER", "IP ADDRESS", "TCP PORT"]
@@ -266,28 +325,73 @@ class FileClient:
 
         for file_name_owner_info in self.local_table.keys():
             file_name, owner = file_name_owner_info.split(",")
-            formatted_table.add_row([
-                file_name,
-                owner,
-                self.local_table[file_name_owner_info][0],
-                self.local_table[file_name_owner_info][1]
-            ])
+            formatted_table.add_row(
+                [
+                    file_name,
+                    owner,
+                    self.local_table[file_name_owner_info][0],
+                    self.local_table[file_name_owner_info][1],
+                ]
+            )
 
         # Sort the table alphabetically by filename. Ties are broken by owner.
-        print(formatted_table.get_string(sort_key=operator.itemgetter(0, 1), sortby="FILENAME"))
+        print(
+            formatted_table.get_string(
+                sort_key=operator.itemgetter(0, 1), sortby="FILENAME"
+            )
+        )
         return
-        
-        
-    def request_file(self, file_name, file_owner):
+
+    def request_file(self, file_name, peer_name):
         """
         Sends a TCP message to the client to request the file.
-        """
-        print(f"< Connection with client {file_owner} established. >")
-        print(f"< Downloading {file_name}... >")
-        print(f"< {file_name} downloaded successfully! >")
-        print(f"< Connection with client {file_owner} closed. >")
 
-        # TODO: deny file request
+        File transfers are done directly between clients and do not
+        involve the server.
+        """
+        # The client should not attempt to establish a TCP connection
+        # if client is itself or if the client does not have the file.
+        if (
+            peer_name == self.name
+            or (str(file_name) + "," + str(peer_name)) not in self.local_table
+        ):
+            print(f"< Invalid Request >")
+            return
+
+        # Establish a TCP connection with the client.
+        peer_ip = self.local_table[str(file_name) + "," + str(peer_name)][0]
+        peer_tcp_port = self.local_table[str(file_name) + "," + str(peer_name)][1]
+        # self.client_request_file_socket = socket(AF_INET, SOCK_STREAM)
+        self.client_request_file_socket.connect((peer_ip, peer_tcp_port))
+        print(f"< Connection with client {peer_name} established. >")
+
+        # Send the file name and name of the client to the client.
+        # TODO: Don't send the name.
+        # Sending the name is only necessary for the client serving
+        # the request to print out transfer messages that correspond with the
+        # reference behavior (without having to scan its local table)
+        file_request = str(file_name) + "," + str(self.name)
+        self.client_request_file_socket.send(file_request.encode())
+
+        
+        # Download the file. For simplicity, the client stores the requested file under the
+        # starting directory in which the client is running.
+        print(f"< Downloading {file_name}... >")
+        with open(file_name, "wb") as f:
+            while True:
+                bytes_read = self.client_request_file_socket.recv(BUFFER_SIZE)
+                # print(f"!!received {bytes_read.decode()}")
+                if not bytes_read:
+                    # File transfer is done because nothing is received.
+                    break
+                f.write(bytes_read)
+        
+        print(f"< {file_name} downloaded successfully! >")
+
+        # Close the TCP connection.
+        self.client_request_file_socket.close()
+        print(f"< Connection with client {peer_name} closed. >")
+
         return
 
     def register(self):
@@ -305,8 +409,7 @@ class FileClient:
         )
 
         # Receive welcome message and client table from server.
-        welcome_message, server_address = self.client_udp_socket.recvfrom(
-            BUFFER_SIZE)
+        welcome_message, server_address = self.client_udp_socket.recvfrom(BUFFER_SIZE)
         print(welcome_message.decode())
         if welcome_message.decode() != ">>> [Welcome, You are registered.]":
             print("!!!already registered, exiting...")
@@ -321,7 +424,8 @@ class FileClient:
         table_received_ack = ">>> [Client table updated.]"
         print(f"{table_received_ack}")
         self.client_udp_socket.sendto(
-            "ACK".encode(), (self.server_ip, self.server_port) # change to server address
+            "ACK".encode(),
+            (self.server_ip, self.server_port),  # change to server address
         )
         return True
 
@@ -345,6 +449,7 @@ class FileClient:
         print(">>> [You are now Offline. Bye.]")
         pass
 
+
 """
 Functionality for FileServer
 """
@@ -355,7 +460,7 @@ class FileServer:
     FileServer is used to keep track of all the clients in the network along with
     their IP addresses and the files that they are sharing. This information is
     pushed to clients and the client instances use these to communicate directly with
-    each other over TCP. 
+    each other over TCP.
 
     Instance variables:
     port: Port that server listens on for UDP messages from clients
@@ -372,13 +477,13 @@ class FileServer:
 
         self.client_table_view = dict()
         return
-    
+
     def bind_server(self, serverPort):
         """
         TODO: take out functionality into separate functions
         """
         serverSocket = socket(AF_INET, SOCK_DGRAM)
-        serverSocket.bind(((''), serverPort))
+        serverSocket.bind(((""), serverPort))
         print("!!The server is ready to receive")
         return serverSocket
 
@@ -393,10 +498,10 @@ class FileServer:
             "status": status,
             "client_ip": client_address[1],
             "client_tcp_port": client_tcp_port,
-            "files": set()
+            "files": set(),
         }
         return
-    
+
     def add_file(self, client_address, file_name):
         """
         Adds the file to the list of files that the client is sharing to
@@ -415,7 +520,7 @@ class FileServer:
             client_name = self.table[client_address]["name"]
             self.client_table_view[str(file_name) + "," + str(client_name)] = (
                 client_address[0],
-                self.table[client_address]["client_tcp_port"]
+                self.table[client_address]["client_tcp_port"],
             )
         return
 
@@ -459,7 +564,7 @@ class FileServer:
     #                 transformed_table[file].append(contact_info)
 
     #     return transformed_table
-    
+
     def listen_for_requests(self):
         """
         The server needs to differentiate between the following types of requests:
@@ -467,20 +572,19 @@ class FileServer:
         2. File sharing request from a client
         """
         while True:
-            try:
-                message, client_address = self.server_socket.recvfrom(BUFFER_SIZE)
-                print(f"!!message from {client_address}: {message.decode()}")
+            message, client_address = self.server_socket.recvfrom(BUFFER_SIZE)
+            print(f"!!message from {client_address}: {message.decode()}")
 
-                if client_address not in self.table.keys():
-                    self.register_clients(message, client_address)
-                else:
-                    self.handle_client_offer(message, client_address)
-            except KeyboardInterrupt: 
-                # Close the server socket upon program termination
-                # so it can be reused for future FileServer sessions.
-                self.server_socket.close()
-                print("Server terminated.")
-                break
+            if client_address not in self.table.keys():
+                self.register_clients(message, client_address)
+            else:
+                self.handle_client_offer(message, client_address)
+            # except KeyboardInterrupt:
+            #     # Close the server socket upon program termination
+            #     # so it can be reused for future FileServer sessions.
+            #     self.server_socket.close()
+            #     print("Server terminated.")
+            #     break
         return
 
     def register_clients(self, message, client_address):
@@ -497,19 +601,16 @@ class FileServer:
         # Check if the client is already registered.
         for existing_client_info in self.table.values():
             if name == existing_client_info["name"]:
-                welcome_message = f"Client {name} already registered. Registration rejected."
-                self.server_socket.sendto(
-                    welcome_message.encode(), client_address)
+                welcome_message = (
+                    f"Client {name} already registered. Registration rejected."
+                )
+                self.server_socket.sendto(welcome_message.encode(), client_address)
                 return
 
         # Add the client information to the registration table and send a welcome message to the client.
         welcome_message = ">>> [Welcome, You are registered.]"
-        self.add_client_info(
-            name, "active", client_address, int(client_tcp_port)
-        )
-        self.server_socket.sendto(
-            welcome_message.encode(), client_address
-        )
+        self.add_client_info(name, "active", client_address, int(client_tcp_port))
+        self.server_socket.sendto(welcome_message.encode(), client_address)
 
         # When a client successfully registers, the server sends the client a transformed version of the table
 
@@ -527,8 +628,7 @@ class FileServer:
             )
 
             try:
-                ack, client_address = self.server_socket.recvfrom(
-                    BUFFER_SIZE)
+                ack, client_address = self.server_socket.recvfrom(BUFFER_SIZE)
                 if ack.decode() == "ACK":
                     break
                 else:  # TODO: get rid of this
@@ -542,10 +642,10 @@ class FileServer:
         self.server_socket.settimeout(None)
 
         return
-    
+
     def handle_client_offer(self, message, client_address):
         """
-        Handles the file sharing request from a client. 
+        Handles the file sharing request from a client.
         The following steps are performed:
         1. The server receives the file sharing request from the client.
         2. The server's client info table will be updated with the new file information.
@@ -569,17 +669,17 @@ class FileServer:
         # by the same client will be ignored.
         for file in file_list:
             self.add_file(client_address=client_address, file_name=file)
-        
+
         # When a client offers a new file to be shared, the server sends a transformed version of the table
-        # to all the registered clients. 
+        # to all the registered clients.
         # Remove inactive clients from the client table view.
         for client_file_offer in self.client_table_view:
             if self.table[client_address]["status"] != "active":
-                self.client_table_view.pop(client_file_offer, "!!Already deleted") 
-        
+                self.client_table_view.pop(client_file_offer, "!!Already deleted")
+
         print(f"!!current table: {self.table}")
         print(f"!!broadcasting client view: {self.client_table_view}")
-                
+
         # Broadcast the transformed table to all the registered clients.
         for client_address in self.table.keys():
             if self.table[client_address]["status"] == "active":
@@ -587,9 +687,9 @@ class FileServer:
                     str.encode(json.dumps(self.client_table_view)), client_address
                 )
                 print(f"!!sent table to {client_address}")
-        
+
         # Continue if ACK received.
-        
+
         return
 
     def get_client_info(self):
@@ -599,8 +699,6 @@ class FileServer:
         and port numbers for other clients to connect to
         """
         pass
-
-
 
 
 def main():
@@ -632,36 +730,24 @@ def main():
     # Note:
     # the server process must already be running for the client to communicate.
     if args.server:
-        parser.add_argument(
-            "port",
-            help="",
-            type=int
-        )
+        parser.add_argument("port", help="", type=int)
     else:
         parser.add_argument(
             "name",
             help="Client name, username for this client in this file-sharing network",
-            type=str
-        )
-        parser.add_argument(
-            "server-ip",
             type=str,
-            help="Server IP address"
         )
-        parser.add_argument(
-            "server-port",
-            help="",
-            type=int
-        )
+        parser.add_argument("server-ip", type=str, help="Server IP address")
+        parser.add_argument("server-port", help="", type=int)
         parser.add_argument(
             "client-udp-port",
             type=int,
-            help="Port that client listens on for communication with the server"
+            help="Port that client listens on for communication with the server",
         )
         parser.add_argument(
             "client-tcp-port",
             type=int,
-            help="Port that client listens for TCP connection requests from other clients for file transfers"
+            help="Port that client listens for TCP connection requests from other clients for file transfers",
         )
 
     args = parser.parse_args()
@@ -674,16 +760,22 @@ def main():
 
     # Run FileServer.
     if getattr(args, "server"):
-        file_server = FileServer(getattr(args, "port"))
-        file_server.listen_for_requests()
-        
+        try:
+            file_server = FileServer(getattr(args, "port"))
+            file_server.listen_for_requests()
+        except KeyboardInterrupt:
+            # Close the server socket upon program termination
+            # so it can be reused for future FileServer sessions.
+            file_server.server_socket.close()
+            print("Server terminated.")
+
     else:
         file_client = FileClient(
             getattr(args, "name"),
             getattr(args, "server-ip"),
             getattr(args, "server-port"),
             getattr(args, "client-udp-port"),
-            getattr(args, "client-tcp-port")
+            getattr(args, "client-tcp-port"),
         )
         # If the client successfully registers with the server, execute the commands.
         if file_client.register():
@@ -696,13 +788,12 @@ def main():
             t1 = threading.Thread(target=file_client.listen_for_file_requests)
             t2 = threading.Thread(target=file_client.listen_for_server_updates)
 
-
             # Start the threads and wait for them to finish.
             # Gracefully terminate the threads when the program terminates.
             # If main thread terminates, the daemon threads will terminate.
             t1.setDaemon(True)
             t2.setDaemon(True)
-            
+
             try:
                 t1.start()
                 t2.start()
@@ -710,6 +801,7 @@ def main():
             except KeyboardInterrupt:
                 file_client.client_tcp_socket.close()
                 file_client.client_udp_socket.close()
+                file_client.client_request_file_socket.close()
                 t1.join()
                 t2.join()
 
