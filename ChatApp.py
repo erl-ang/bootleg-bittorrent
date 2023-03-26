@@ -314,7 +314,7 @@ class FileClient:
 
         table, server_address = self.client_udp_socket.recvfrom(BUFFER_SIZE)
         # Json.loads() requires double quotes for keys and values.
-        self.local_table = json.loads(table)
+        self.local_table = json.loads(table.decode())
         print(f"local table: {self.local_table}")
 
         # Once the table is received, the client should send an ack to the server.
@@ -523,7 +523,7 @@ class FileServer:
         for _ in range(MAX_RETRIES + 1):  # +1 because the first try is not a retry.
             # Send the transformed table to the client.
             self.server_socket.sendto(
-                str(self.client_table_view).encode(), client_address
+                str.encode(json.dumps(self.client_table_view)), client_address
             )
 
             try:
