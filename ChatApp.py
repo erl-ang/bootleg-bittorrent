@@ -152,7 +152,6 @@ class FileClient:
                 else:
                     print(">>> [Invalid command. Please try again.]")
             except KeyboardInterrupt:
-                self.client_udp_socket.close()
                 print(f"!!! Client {self.name} left silently - execute_commands")
                 break
 
@@ -186,7 +185,7 @@ class FileClient:
             except Exception as e:
                 print(f"!! {e}")
 
-                self.client_udp_socket.close()
+                # Sockets are cleaned up in the main thread exception handler.
                 print(
                     f"!!! Client {self.name} left silently - listen_for_server_updates"
                 )
@@ -225,7 +224,7 @@ class FileClient:
                 with open(file_path, "rb") as f:
                     while True:
                         bytes_read = f.read(BUFFER_SIZE)
-                        print(f"!!bytes_read: {bytes_read.decode()}")
+                        # print(f"!!bytes_read: {bytes_read.decode()}")
                         if not bytes_read:
                             print(f"!!! Client {self.name} finished sending {file_request}")
                             break
@@ -381,7 +380,7 @@ class FileClient:
         with open(file_name, "wb") as f:
             while True:
                 bytes_read = self.client_request_file_socket.recv(BUFFER_SIZE)
-                print(f"!!received {bytes_read.decode()}")
+                # print(f"!!received {bytes_read.decode()}")
                 if not bytes_read:
                     # File transfer is done because nothing is received.
                     break
@@ -390,7 +389,6 @@ class FileClient:
         print(f"< {file_name} downloaded successfully! >")
 
         # Close the TCP connection.
-        # TODO: will this fuck up future requests?
         self.client_request_file_socket.close()
         print(f"< Connection with client {peer_name} closed. >")
 
@@ -574,20 +572,19 @@ class FileServer:
         2. File sharing request from a client
         """
         while True:
-            try:
-                message, client_address = self.server_socket.recvfrom(BUFFER_SIZE)
-                print(f"!!message from {client_address}: {message.decode()}")
+            message, client_address = self.server_socket.recvfrom(BUFFER_SIZE)
+            print(f"!!message from {client_address}: {message.decode()}")
 
-                if client_address not in self.table.keys():
-                    self.register_clients(message, client_address)
-                else:
-                    self.handle_client_offer(message, client_address)
-            except KeyboardInterrupt:
-                # Close the server socket upon program termination
-                # so it can be reused for future FileServer sessions.
-                self.server_socket.close()
-                print("Server terminated.")
-                break
+            if client_address not in self.table.keys():
+                self.register_clients(message, client_address)
+            else:
+                self.handle_client_offer(message, client_address)
+            # except KeyboardInterrupt:
+            #     # Close the server socket upon program termination
+            #     # so it can be reused for future FileServer sessions.
+            #     self.server_socket.close()
+            #     print("Server terminated.")
+            #     break
         return
 
     def register_clients(self, message, client_address):
@@ -763,8 +760,14 @@ def main():
 
     # Run FileServer.
     if getattr(args, "server"):
-        file_server = FileServer(getattr(args, "port"))
-        file_server.listen_for_requests()
+        try:
+            file_server = FileServer(getattr(args, "port"))
+            file_server.listen_for_requests()
+        except KeyboardInterrupt:
+            # Close the server socket upon program termination
+            # so it can be reused for future FileServer sessions.
+            file_server.server_socket.close()
+            print("Server terminated.")
 
     else:
         file_client = FileClient(
@@ -798,6 +801,7 @@ def main():
             except KeyboardInterrupt:
                 file_client.client_tcp_socket.close()
                 file_client.client_udp_socket.close()
+                file_client.client_request_file_socket.close()
                 t1.join()
                 t2.join()
 
