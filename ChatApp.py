@@ -88,6 +88,7 @@ class FileClient:
         self.work_queue = queue.Queue()
 
         self.local_table = dict()
+        self.dir = None
         return
 
     def execute_commands(self):
@@ -117,9 +118,14 @@ class FileClient:
                     if not dir_set:
                         print(">>> [Please set a directory first. Usage: setdir <dir>.]")
                     else:
-                        self.offer_file(args)
+                        if len(args) == 0:
+                            print(f">>> [Please provide files to offer from {self.dir}.]")
+                        else:
+                            self.offer_file(args)
                 elif command == "list":
                     self.list_files()
+                elif command == "request":
+                    self.request_file(file_name=args[0], client=args[1])
                 elif command == "get":
                     self.get_file()
                 elif command == "deregister":
@@ -197,6 +203,7 @@ class FileClient:
         """
         # Check for existence of the directory in the filesystem.
         if os.path.isdir(dir_name):
+            self.dir = dir_name
             print(
                 f">>> [Successfully set {dir_name} as the directory for searching offered files.]")
             return True
@@ -278,7 +285,7 @@ class FileClient:
         return
         
         
-    def request_file(self, file_name, file_owner):
+    def request_file(self, args):
         """
         Sends a TCP message to the client to request the file.
         """
