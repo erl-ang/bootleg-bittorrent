@@ -235,7 +235,7 @@ class FileClient:
                     while True:
                         bytes_read = f.read(BUFFER_SIZE)
                         # print(f"!!bytes_read: {bytes_read.decode()}")
-                        if not bytes_read: # EOF
+                        if not bytes_read:  # EOF
                             # print(
                             #     f"!!! Client {self.name} finished sending {file_request}"
                             # )
@@ -639,7 +639,7 @@ class FileServer:
 
             try:
                 ack, client_address = self.server_socket.recvfrom(BUFFER_SIZE)
-                
+
                 if ack.decode() == "ACK":
                     break
                 else:  # TODO: get rid of this
