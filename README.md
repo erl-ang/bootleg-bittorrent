@@ -1,4 +1,3 @@
-# csee4119-file-transfer
 # Bootleg BitTorrent (P2P File Transfer)
 
 - Name: Erin Liang
