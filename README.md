@@ -9,7 +9,7 @@ This program implements of a simple file sharing application similar to the abov
 
 Both UDP and TCP are used. All server-client communication is done over UDP, whereas clients communicate with each other over TCP. 
 
-Created for Professor Misra's Spring 2023 Computer Networks (CSEE W4119) course @ Columbia University. [The spec can be found here.](https://github.com/erl-ang/bootleg-bittorrent/blob/master/spec.pdf)
+Created for Professor Misra's Spring 2023 Computer Networks (CSEE W4119) course @ Columbia University. [The spec can be found here.](https://github.com/erl-ang/bootleg-bittorrent/blob/master/spec.pdf) Note that we had to write all our code in one Python file, which is why the design is so shit.
 
 # Running the program 🏃
 First, run the server: 
