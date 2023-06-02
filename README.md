@@ -1,65 +1,41 @@
-# Bootleg BitTorrent (P2P File Transfer)
+# Bootleg BitTorrent (P2P File Transfer System)
+Erin Liang, ell2147
 
-- Name: Erin Liang
-- uni: ell2147
+The following Python program implements a simple file transfer application with at least 3 clients and a server using both TCP and UDP protocols where the overall system offers at least 10 unique files.
 
-<aside>
-🗿 The following python program implements a simple file transfer application with at least 3 clients and a server using both TCP and UDP protocols where the overall system offers at least 10 unique files.
 
-</aside>
+# running the program 🏃
 
-# Setup
-
-## Required Python libraries
-
-<aside>
-🗿 these must be installed before running ChatApp. I'll include a requirements.txt file to make your life easier for the next project!
-
-</aside>
-
-- argparse
-- socket
-- ipaddress
-- os
-- threading
-- queue
-- json
-- operator
-- prettytable
-- sys
-
-# Running the program
-
-## Server mode
+## server mode
 
 - general usage:
 
 ```bash
-python3 ChatApp.py (-s | -c) <port>
+python3 FileApp.py (-s | -c) <port>
 ```
 
-- example: initiating ChatApp server running on port 1025
+- example: initiating FileApp server running on port 1025
 
 ```bash
 python3 ChatApp.py -s 1025
 ```
 
-## Client mode usage
+## client mode usage
 
 - general usage:
 
 ```bash
-ChatApp.py (-s | -c) <name> <server-ip> <server-port> \
+FileApp.py (-s | -c) <name> <server-ip> <server-port> \
  <client-udp-port> <client-tcp-port>
 ```
 
-- example: initiating ChatApp client “erin” running locally that communicates on port 1026 with the server that listens on port 1025. “erin” listens to file requests from other clients on port 1027.
+- example: initiating FileApp client “erin” running locally that communicates on port 1026 with the server that listens on port 1025. “erin” listens to file requests from other clients on port 1027.
 
 ```bash
 python3 ChatApp.py -c we 0.0.0.0 1025 1026 1027
 ```
 
-### Help
+### help!
 
 - a help option is included to make interacting with the program arguments easier:
 
@@ -84,40 +60,40 @@ client-tcp-port 1027
 ...
 ```
 
-# Program Features
+# program features
 
 - The client can register, offer files to other clients by sending a UDP message to the server, request files from another client, list files, and deregister
-- the following diagrams help demonstrate the sequence of messages exchanged for each successful command. See commented code for more details.
+- The following diagrams help demonstrate the sequence of messages exchanged for each successful command. See commented code for more details.
 
-## Registration
+## registration
 
 - successful registration messages exchanged:
 
 ![Untitled](readME%20d4dc6565700142ce87e0b4bce7938d02/Untitled.png)
 
-## File Offering
+## file offering
 
 - successful file offering messages exchanged
 
 ![Untitled](readME%20d4dc6565700142ce87e0b4bce7938d02/Untitled%201.png)
 
-## File Listing
+## file listing
 
 - done entirely on client-side and just really using prettytable library
 
-## File Transfer
+## file transfer
 
 - successful file transfer messages exchanged
 
 ![Untitled](readME%20d4dc6565700142ce87e0b4bce7938d02/Untitled%202.png)
 
-## De-Registration
+## de-registration
 
 - successful de-registration sequence:
 
 ![Untitled](readME%20d4dc6565700142ce87e0b4bce7938d02/Untitled%203.png)
 
-# Explanation of Algos + Data Structures
+# explanation of algos + data Structures
 
 <aside>
 🗿 example runs corresponding to the grading rubric are included in the [Testing section](https://www.notion.so/readME-d4dc6565700142ce87e0b4bce7938d02). These can also be found in the tests.txt file included in the submission.
@@ -668,5 +644,3 @@ FILENAME  OWNER  IP ADDRESS  TCP PORT
 2.txt     heyy   127.0.0.1   1030     
 jjs.jpg   heyy   127.0.0.1   1030
 ```
-
-# 👋 thanks!
