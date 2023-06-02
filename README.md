@@ -1,10 +1,12 @@
 # Bootleg BitTorrent (P2P File Transfer System)
 Erin Liang, ell2147
 
-The following Python program implements a simple file transfer application with at least 3 clients and a server using both TCP and UDP protocols where the overall system offers at least 10 unique files.
+Implementation of a simple file sharing python application with at least 3 clients and a server and the overall system offers at least 10 unique files. Both UDP and TCP are used. 
 
+Created for Professor Misra's Spring 2023 Computer Networks (CSEE W4119) course @ Columbia University.
 
-# running the program 🏃
+# Running the program 🏃
+First, run the server: 
 
 ## server mode
 
@@ -17,10 +19,11 @@ python3 FileApp.py (-s | -c) <port>
 - example: initiating FileApp server running on port 1025
 
 ```bash
-python3 ChatApp.py -s 1025
+python3 FileApp.py -s 1025
 ```
 
-## client mode usage
+Now, we can instantiate any number of clients: 
+## client mode
 
 - general usage:
 
@@ -32,21 +35,21 @@ FileApp.py (-s | -c) <name> <server-ip> <server-port> \
 - example: initiating FileApp client “erin” running locally that communicates on port 1026 with the server that listens on port 1025. “erin” listens to file requests from other clients on port 1027.
 
 ```bash
-python3 ChatApp.py -c we 0.0.0.0 1025 1026 1027
+python3 FileApp.py -c we 0.0.0.0 1025 1026 1027
 ```
 
-### help!
+## help!
 
 - a help option is included to make interacting with the program arguments easier:
 
 ```bash
-python3 ChatApp.py -h
+python3 FileApp.py -h
 ```
 
 - For both modes, arguments are also printed out upon successful program initiation
 
 ```bash
-$ python3 ChatApp.py -c we 0.0.0.0 1025 1026 1027
+$ python3 FileApp.py -c we 0.0.0.0 1025 1026 1027
 ===============
 Printing args:
 server False
@@ -60,22 +63,26 @@ client-tcp-port 1027
 ...
 ```
 
-# program features
+# Program Features
+The client can
+- register,
+- offer files to other clients by sending a UDP message to the server,
+- request files from another client, list files,
+- and deregister
 
-- The client can register, offer files to other clients by sending a UDP message to the server, request files from another client, list files, and deregister
-- The following diagrams help demonstrate the sequence of messages exchanged for each successful command. See commented code for more details.
+The following diagrams help demonstrate the sequence of messages exchanged for each successful command. See commented code for more details.
 
 ## registration
 
 - successful registration messages exchanged:
 
-![Untitled](readME%20d4dc6565700142ce87e0b4bce7938d02/Untitled.png)
+<p align="center"><img src="https://github.com/erl-ang/bootleg-bittorrent/blob/master/assets/registration.png"></p>
 
 ## file offering
 
 - successful file offering messages exchanged
 
-![Untitled](readME%20d4dc6565700142ce87e0b4bce7938d02/Untitled%201.png)
+<p align="center"><img src="https://github.com/erl-ang/bootleg-bittorrent/blob/master/assets/file_offer.png"></p>
 
 ## file listing
 
@@ -84,32 +91,21 @@ client-tcp-port 1027
 ## file transfer
 
 - successful file transfer messages exchanged
-
-![Untitled](readME%20d4dc6565700142ce87e0b4bce7938d02/Untitled%202.png)
+<p align="center"><img src="https://github.com/erl-ang/bootleg-bittorrent/blob/master/assets/file_transfer.png"></p>
 
 ## de-registration
 
 - successful de-registration sequence:
+<p align="center"><img src="https://github.com/erl-ang/bootleg-bittorrent/blob/master/assets/deregistration.png"></p>
 
-![Untitled](readME%20d4dc6565700142ce87e0b4bce7938d02/Untitled%203.png)
+# Design: Algorithms + Data Structures
 
-# explanation of algos + data Structures
+* example runs corresponding to the grading rubric are included in the Testing section. These can also be found in the tests.txt file included in the submission.
 
-<aside>
-🗿 example runs corresponding to the grading rubric are included in the [Testing section](https://www.notion.so/readME-d4dc6565700142ce87e0b4bce7938d02). These can also be found in the tests.txt file included in the submission.
-
-</aside>
-
-<aside>
-🗿 The print messages with “!!!” and “DEBUG” can be uncommented to see all the messages passed between the ChatApp instances. In the future, logging levels would be nice.
-
-</aside>
-
-## General Control Flow + Notes on Threading with shared sockets
+## General Control Flow + Notes on Threading with Shared Sockets
 
 - The ACK system employs a best effort retry twice mechanism. In all cases where the program instance is expecting an ACK and retries up to 2 times, we mark the client as offline.
-
-[Ed — Digital Learning Platform](https://edstem.org/us/courses/36439/discussion/2833815)
+   - [Ed — Digital Learning Platform](https://edstem.org/us/courses/36439/discussion/2833815)
 
 ### Client Control Flow
 
@@ -122,9 +118,7 @@ client-tcp-port 1027
     - if we `recvfrom` in more than one of these threads, the thread that is waiting for an ACK could receive a table update and not know how to handle it (or vice versa). Instead of trying to pass the received message to another thread, which introduces a good deal of complexity, we just have one thread listening to the UDP socket.
     - This thread, executing `listen_for_server_updates` , will be the only thread that `recvfrom`s the client UDP socket and puts the message on the appropriate ACK queue or updates the table.
     - TODO: might not have to do queues because at a given time, the client is only executing one command at a time. Separate queues are safer though for peace of mind for grading, so I kept them in.
-    - reference:
-    
-    [Ed — Digital Learning Platform](https://edstem.org/us/courses/36439/discussion/2831859)
+    - reference: [Ed — Digital Learning Platform](https://edstem.org/us/courses/36439/discussion/2831859)
     
 
 ### Server Control Flow
@@ -177,10 +171,7 @@ client-tcp-port 1027
 
 - why this key?
     - when requesting a file, the client needs to be able to quickly check whether that file actually belongs to that client.
-    - need a str, int, float, bool or None to send over sockets using `json` dumps and loads to serialize and deserialize the dictionary, so we need to either use one field or concatenate multiple
-    
-    [Sending a Dictionary using Sockets in Python?](https://stackoverflow.com/questions/15190362/sending-a-dictionary-using-sockets-in-python)
-    
+    - need a str, int, float, bool or None to send over sockets using `json` dumps and loads to serialize and deserialize the dictionary, so [we need to either use one field or concatenate multiple](https://stackoverflow.com/questions/15190362/sending-a-dictionary-using-sockets-in-python)
     - we can’t use `file_name` to index because multiple clients can offer the same file. Also, one host can have multiple instances of chatapp clients that offer the same file, so we can’t index by `file_name,client_ip`. `file_name,client_name` guarantees us a unique key and the leftover values conveniently makes up the address where the client can request the file from the client.
 - the udp ports are not included in this view because they are only for server-client communication.
 - An alternative approach could be to call some sort of transformation algorithm to transform the server table to the client view every time it needs to be broadcasted.  However, because server updates are likely common, we just choose to store extra state and maintain both views as we go.
@@ -195,7 +186,7 @@ client-tcp-port 1027
 # second >>> is from the table broadcast update.
 ```
 
-- Not bugs, but there are some `TODOs` in the code to remove code paths where there should be an invariant (i.e. the code should never execute).
+- there are some leftover `TODOs` in the code to remove code paths where there should be an invariant (i.e. the code should never execute).
 
 ### Assumptions
 
@@ -203,12 +194,7 @@ client-tcp-port 1027
 - It is assumed that different clients will provide different `client-tcp` and `client-udp` ports from each other. Clients providing the ports that are already in use will probably fail with `OSError: Address already in use` and cause undefined behavior
 
 # Additional Features
-
-<aside>
-🗿 most add-ons have to do with better argument handling:
-
-</aside>
-
+most add-ons have to do with better argument handling:
 - After the client deregisters, the thread executing the commands will still be going because the behavior is unspecified. All commands except `list` will stop working, returning “invalid command” outputs
 - argparsing is more elegant by using the argparsing module
 - Usages are printed after unsuccessful client commands
@@ -217,12 +203,9 @@ client-tcp-port 1027
 ## Future work
 
 - different levels of logging instead of commenting and uncommenting code for debugging.
-- Adding multithreading into the server. Otherwise, while you're waiting for a new connection your server will be blocking and won't be able to respond to other messages and not able to send a timely ACK —> Ed post
-    
-    [Ed — Digital Learning Platform](https://edstem.org/us/courses/36439/discussion/2803329)
-    
-- Resetting setdir will lead to undefined behavior if the client instance already offered files.
-- Reevaluate whether we need separate queues for dereg ack and offer ack..
+- Adding multithreading into the server. Otherwise, while you're waiting for a new connection your server will be blocking and won't be able to respond to other messages and not able to send a timely ACK —> [Ed post](https://edstem.org/us/courses/36439/discussion/2803329)
+- Resetting `setdir` will lead to undefined behavior if the client instance already offered files.
+- Reevaluate whether we need separate queues for dereg ack and offer ack
 - It doesn’t make sense that deregister takes the name of a client. It should just be the current client because there are no other options..
 - Implement `rereg` as it was alluded to in the spec.
 - Restructure code into private helper methods vs public functions
@@ -236,7 +219,7 @@ client-tcp-port 1027
 
 ```bash
 # Server running on port 1025
-$ python3 ChatApp.py -c heyy 0.0.0.0 1025 1026 1027 
+$ python3 FileApp.py -c heyy 0.0.0.0 1025 1026 1027 
 ===============
 Printing args:
 server False
@@ -272,7 +255,7 @@ Client heyy already registered. Registration rejected.
 ### 3. Upon successful registration, client’s local table is initialized.
 
 ```bash
-$ python3 ChatApp.py -c heyy 0.0.0.0 1025 1029 1030                  
+$ python3 FileApp.py -c heyy 0.0.0.0 1025 1029 1030                  
 ===============
 Printing args:
 server False
@@ -309,20 +292,20 @@ port 1025
 
 ## File Offering Tests
 
-The following tests assume the directory structure, where `ChatApp` is being run from its own folder
+The following tests assume the directory structure, where `FileApp` is being run from its own folder
 
 ```bash
-|------dir
-|	   \________hello.txt
-|	   \________wee.txt
-|	   \________jjs.jpg
-|	   \________i_love_the_tas.txt
-|	   \________1.txt
-|	   \________2.txt
-|	   \________3.txt
-|	   \________4.txt
-|	   \________5.txt
- \_ ChatApp.py
+├── dir
+|	   ├──hello.txt
+|	   ├── wee.txt
+|	   ├── i_love_the_tas.txt
+|	   ├── 1.txt
+|	   ├── 2.txt
+|	   ├── 3.txt
+|	   ├── 4.txt
+|	   ├── 5.txt
+|	   └── jjs.jpg
+└──  FileApp.py
 ```
 
 ### `setdir` tests
@@ -361,7 +344,7 @@ Starting 3 clients and server
 
 ```bash
 # server starts
-$ python3 ChatApp.py -s 1025
+$ python3 FileApp.py -s 1025
 ===============
 Printing args:
 server True
@@ -373,7 +356,7 @@ port 1025
 
 ```bash
 # client 1 registered successfully
-$ python3 ChatApp.py -c heyy 0.0.0.0 1025 1029 1030
+$ python3 FileApp.py -c heyy 0.0.0.0 1025 1029 1030
 ===============
 Printing args:
 server False
@@ -388,7 +371,7 @@ client-tcp-port 1030
 ...
 
 # client 2 registered successfully
-$ python3 ChatApp.py -c waa 0.0.0.0 1025 1028 1031
+$ python3 FileApp.py -c waa 0.0.0.0 1025 1028 1031
 ===============
 Printing args:
 server False
@@ -403,7 +386,7 @@ client-tcp-port 1031
 ...
 
 # client 3 registered successfully
-$ python3 ChatApp.py -c client3 0.0.0.0 1025 1032 1033
+$ python3 FileApp.py -c client3 0.0.0.0 1025 1032 1033
 ===============
 Printing args:
 server False
@@ -478,7 +461,7 @@ wee.txt   heyy     127.0.0.1   1030
     - note that the prompt messages get messed up slightly when the client threads are both waiting for user input and receiving updates from the server’s broadcasts.
 
 ```bash
-$ python3 ChatApp.py -c heyy 0.0.0.0 1025 1029 1030   
+$ python3 FileApp.py -c heyy 0.0.0.0 1025 1029 1030   
 ===============
 Printing args:
 server False
@@ -507,7 +490,7 @@ list
 - client 2 joins and lists the files
 
 ```bash
-$ python3 ChatApp.py -c waa 0.0.0.0 1025 1028 1031
+$ python3 FileApp.py -c waa 0.0.0.0 1025 1028 1031
 ===============
 Printing args:
 server False
@@ -597,7 +580,7 @@ FILENAME   OWNER  IP ADDRESS  TCP PORT
 ...
 ```
 
-- 1.txt now appears in the working directory of ChatApp.py
+- 1.txt now appears in the working directory of FileApp.py
 
 ### Appropriate status messages should be printed at critical points of the file transfer, similar to the example provided in the specification.
 
