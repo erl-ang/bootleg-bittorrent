@@ -1,9 +1,15 @@
 # Bootleg BitTorrent (P2P File Transfer System)
 Erin Liang, ell2147
 
-Implementation of a simple file sharing python application with at least 3 clients and a server and the overall system offers at least 10 unique files. Both UDP and TCP are used. 
+[Peer-to-peer networking](https://en.wikipedia.org/wiki/Peer-to-peer) is a distributed communications architecture in which. In the context of file sharing, P2P programs allow computers to download files and make them available to other users on the network. Most infamously, BitTorrent and Limewire utilized the P2P model.
 
-Created for Professor Misra's Spring 2023 Computer Networks (CSEE W4119) course @ Columbia University.
+<p align="center"><img src="https://github.com/erl-ang/bootleg-bittorrent/blob/master/assets/p2p.png"></p>
+
+This program implements of a simple file sharing application similar to the above model on the right. There is additionally a server instance that is used to keep track of all the clients and the files they are sharing in the P2P network. This file information is pushed (broadcasted) to clients. The client instances use this info to communicate directly with each other to initiate file transfers. 
+
+Both UDP and TCP are used. All server-client communication is done over UDP, whereas clients communicate with each other over TCP. 
+
+Created for Professor Misra's Spring 2023 Computer Networks (CSEE W4119) course @ Columbia University. [The spec can be found here.](https://github.com/erl-ang/bootleg-bittorrent/blob/master/spec.pdf)
 
 # Running the program 🏃
 First, run the server: 
@@ -63,40 +69,58 @@ client-tcp-port 1027
 ...
 ```
 
+### Assumptions
+
+- The server should start before the client tries to connect to it. Otherwise, the behavior is undefined
+- It is assumed that different clients will provide different `client-tcp` and `client-udp` ports from each other. Clients providing the ports that are already in use will probably fail with `OSError: Address already in use` and cause undefined behavior
+
 # Program Features
 The client can
-- register,
+- register with the server,
 - offer files to other clients by sending a UDP message to the server,
-- request files from another client, list files,
+- request files from another client,
+- list files,
 - and deregister
 
 The following diagrams help demonstrate the sequence of messages exchanged for each successful command. See commented code for more details.
 
 ## registration
+Only registered clients should be able to offer files and will receive the updated list of files shared by other registered clients. Not all clients that register must offer files. The server takes in registration requests from clients using UDP, which means that the server needs to be started before clients can start coming online.
 
-- successful registration messages exchanged:
+- a successful registration sequence:
 
 <p align="center"><img src="https://github.com/erl-ang/bootleg-bittorrent/blob/master/assets/registration.png"></p>
 
+The server has to maintain a table with the nick-names of all the clients, their statuses, the files they are sharing, and their IP addresses and port numbers for other clients to request files. 
+
 ## file offering
 
-- successful file offering messages exchanged
+Once the clients are set up and registered with the server, clients should be able to advertise file offerings to other registered clients through the server.
 
+- a successful file offering sequence:
 <p align="center"><img src="https://github.com/erl-ang/bootleg-bittorrent/blob/master/assets/file_offer.png"></p>
 
-## file listing
+Whenever the server receives a file offering message, the server adds an entry to its table of filenames offered by clients, which is then broadcasted to all active clients.
 
-- done entirely on client-side and just really using prettytable library
+## file listing
+Clients are able to view the list of files available to download. When the server broadcasts the most up-to-date list of file offerings, the client stores and updates its own local table. This command is just enabling the client to format and print its local table. i.e. This done entirely on client-side (no back-and-forth needed)
 
 ## file transfer
+To request a file, the client will first use its table to figure out who the file owner is. then the client will establish a TCP connection with the file owner.
 
-- successful file transfer messages exchanged
+- a successful file transfer sequence:
 <p align="center"><img src="https://github.com/erl-ang/bootleg-bittorrent/blob/master/assets/file_transfer.png"></p>
 
-## de-registration
+File transfers are done directly between clients. Appropriate status messages are printed throughout the transfer process.
 
-- successful de-registration sequence:
+## de-registration
+This is a book-keeping function to keep track of active clients. When a client is about to go offline, it should stop listening for file requests from its peers. Then, it must announce to the server that it is going offline
+
+- a successful de-registration sequence:
 <p align="center"><img src="https://github.com/erl-ang/bootleg-bittorrent/blob/master/assets/deregistration.png"></p>
+
+- The client has to wait for an ack from the server within 500 msecs. The client should retry for 2 times and terminate if it fails all three times.
+- The client program will not terminate after a successful de-registration.
 
 # Design: Algorithms + Data Structures
 
@@ -188,10 +212,6 @@ The following diagrams help demonstrate the sequence of messages exchanged for e
 
 - there are some leftover `TODOs` in the code to remove code paths where there should be an invariant (i.e. the code should never execute).
 
-### Assumptions
-
-- The server should start before the client tries to connect to it. Otherwise, the behavior is undefined
-- It is assumed that different clients will provide different `client-tcp` and `client-udp` ports from each other. Clients providing the ports that are already in use will probably fail with `OSError: Address already in use` and cause undefined behavior
 
 # Additional Features
 most add-ons have to do with better argument handling:
