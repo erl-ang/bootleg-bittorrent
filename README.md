@@ -1,7 +1,7 @@
 # Bootleg BitTorrent (P2P File Transfer System) 📂
 name, uni: Erin Liang, ell2147
 
-[Peer-to-peer networking](https://en.wikipedia.org/wiki/Peer-to-peer) is a distributed communications architecture. In the context of file sharing, P2P programs allow computers to download files and make them available to other users on the network. Most infamously, BitTorrent and Limewire utilized the P2P model.
+[Peer-to-peer networking](https://en.wikipedia.org/wiki/Peer-to-peer) is a distributed communications architecture. In the context of file sharing, P2P programs allow computers to download files and make them available to other users on the network. Infamous examples of P2P programs include BitTorrent and Limewire.
 
 <p align="center"><img src="https://github.com/erl-ang/bootleg-bittorrent/blob/master/assets/p2p.png"></p>
 
@@ -12,39 +12,39 @@ Both UDP and TCP are used. All server-client communication is done over UDP, whe
 Created for Professor Misra's Spring 2023 Computer Networks course (CSEE W4119) @ Columbia University. [The spec can be found here.](https://github.com/erl-ang/bootleg-bittorrent/blob/master/spec.pdf) Note that we had to write all our code in one Python file, which is why the design is so shit.
 
 # Running the program 🏃
-First, run the server: 
+First, run the server:
 
-## server mode
+## Server Mode
 
-- general usage:
+- General Usage:
 
 ```bash
 python3 FileApp.py (-s | -c) <port>
 ```
 
-- example: initiating FileApp server running on port 1025
+- Example: initiating FileApp server running on port 1025
 
 ```bash
 python3 FileApp.py -s 1025
 ```
 
 Now, we can instantiate any number of clients: 
-## client mode
+## Client Mode
 
-- general usage:
+- General Usage:
 
 ```bash
 FileApp.py (-s | -c) <name> <server-ip> <server-port> \
  <client-udp-port> <client-tcp-port>
 ```
 
-- example: initiating FileApp client “erin” running locally that communicates on port 1026 with the server that listens on port 1025. “erin” listens to file requests from other clients on port 1027.
+- Example: initiating FileApp client “erin” running locally that communicates on port 1026 with the server that listens on port 1025. “erin” listens to file requests from other clients on port 1027.
 
 ```bash
 python3 FileApp.py -c we 0.0.0.0 1025 1026 1027
 ```
 
-## help me! 
+## Help me! 
 
 - a help option is included to make interacting with the program arguments easier:
 
@@ -76,7 +76,7 @@ client-tcp-port 1027
 
 # Program Features 🤩
 The client can
-- **register** itself with the server,
+- **register** itself with the server so it can begin sending and receiving files,
 - **offer files** to other clients by sending a UDP message to the server,
 - **request files** directly from another client,
 - **list files** in the P2P system (along with where to request them),
@@ -84,7 +84,7 @@ The client can
 
 The following really messy diagrams help demonstrate the sequence of messages exchanged for each successful command. See commented code for more details.
 
-## registration
+## Registration
 Only registered clients should be able to offer files and will receive the updated list of files shared by other registered clients. Not all clients that register must offer files. The server takes in registration requests from clients using UDP, which means that the server needs to be started before clients can start coming online.
 
 - a successful registration sequence:
@@ -93,7 +93,7 @@ Only registered clients should be able to offer files and will receive the updat
 
 The server has to maintain a table with the nick-names of all the clients, their statuses, the files they are sharing, and their IP addresses and port numbers for other clients to request files. 
 
-### registration tests
+### Registration Tests
 #### test 1: Client successfully registers with an available username
 
 ```bash
@@ -443,7 +443,7 @@ FILENAME   OWNER  IP ADDRESS  TCP PORT
  wee.txt             waa    127.0.0.1   1031
 ```
 
-## file transfer
+## File Transfer
 To request a file, the client will first use its table to figure out who the file owner is. then the client will establish a TCP connection with the file owner.
 
 - a successful file transfer sequence:
@@ -451,7 +451,7 @@ To request a file, the client will first use its table to figure out who the fil
 
 File transfers are done directly between clients. Appropriate status messages are printed throughout the transfer process.
 
-### file transfer tests
+### File Transfer Tests
 
 #### test 1: Client can successfully request and receive a file offered by another client. The received file content should be exactly the same as that of the offered file of the host.
 
