@@ -93,8 +93,8 @@ Only registered clients should be able to offer files and will receive the updat
 
 The server has to maintain a table with the nick-names of all the clients, their statuses, the files they are sharing, and their IP addresses and port numbers for other clients to request files. 
 
-### Registration Tests
-#### test 1: Client successfully registers with an available username
+### Registration Scenarios
+#### Client successfully registers with an available username
 
 ```bash
 # Server running on port 1025
@@ -114,7 +114,7 @@ client-tcp-port 1027
 >>>
 ```
 
-#### test 2: Server rejects registration request with a username already taken by another client.
+#### Server rejects registration request with a username already taken by another client.
 ```bash
 $  python3 ChatApp.py -c heyy 0.0.0.0 1025 1029 1030
 ===============
@@ -130,7 +130,7 @@ client-tcp-port 1030
 Client heyy already registered. Registration rejected.
 ```
 
-#### test 3: Upon successful registration, client’s local table is initialized.
+#### Upon successful registration, client’s local table is initialized.
 
 ```bash
 $ python3 FileApp.py -c heyy 0.0.0.0 1025 1029 1030                  
@@ -148,7 +148,7 @@ client-tcp-port 1030
 [DEBUG] LOCAL TABLE: {}
 ```
 
-#### test 4: Server retries sending the table of offered files a maximum of 2 times when the client *ack* is not received within 500ms. This was tested by commenting out the registration ack to the server.
+#### Server retries sending the table of offered files a maximum of 2 times when the client *ack* is not received within 500ms. This was tested by commenting out the registration ack to the server.
 
 
 ```bash
@@ -169,7 +169,7 @@ port 1025
     - if only the client’s ack is being lost, (i.e. client is receiving the table and its retransmissions), it will print the table three times.
     - Otherwise if it never receives anything from the server, the client program will be stuck on `recv`
 
-## file offering
+## File Offering
 
 Once the clients are set up and registered with the server, clients should be able to advertise file offerings to other registered clients through the server.
 
@@ -178,7 +178,7 @@ Once the clients are set up and registered with the server, clients should be ab
 
 Whenever the server receives a file offering message, the server adds an entry to its table of filenames offered by clients, which is then broadcasted to all active clients.
 
-### file offering tests
+### File offering scenarios
 The following tests assume the directory structure, where `FileApp` is being run from its own folder
 
 ```bash
@@ -195,7 +195,7 @@ The following tests assume the directory structure, where `FileApp` is being run
 └──  FileApp.py
 ```
 
-#### test 1: directory provided with `setdir` is invalid
+#### Directory provided with `setdir` is invalid
 - given an invalid directory, the client program doesn’t crash and an appropriate error message is printed
 - `offer` command should fail with an appropriate error message if no setdir command has succeeded
 
@@ -211,7 +211,7 @@ Client view:
 >>> [Client table updated.]
 ```
 
-#### test 2: `offer` works for single and multiple (e.g. 3) filename argument(s).
+#### `offer` works for single and multiple (e.g. 3) filename argument(s).
 
 ```bash
 >>> offer hello.txt jjs.jpg i_love_the_tas.txt
@@ -219,10 +219,9 @@ Client view:
 >>> [Client table updated.]
 ```
 
-#### test 3: Server broadcasts on new offered files by client(s) work.
+#### Server broadcasts on new offered files by client(s) work.
 
-Testing scenario: 
-
+scenario: 
 - start 3 clients, and server.
 - After client 1 successfully offers a file to the server, client 2 & 3 outputs appropriate status messages indicating they have received the new table from Server and updated their local table.
 
@@ -315,13 +314,13 @@ client-tcp-port 1033
 ```
 
 
-## file listing
+## File Listing
 Clients are able to view the list of files available to download. When the server broadcasts the most up-to-date list of file offerings, the client stores and updates its own local table. This command is just enabling the client to format and print its local table. i.e. This done entirely on client-side (no back-and-forth needed)
 
-### file listing tests
+### File listing scenarios
 The following tests are a continuation of the server + 3-clients session from the previous test:
 
-#### test 1: Listing the correct file offerings using the table (with proper formatting)
+#### Listing the correct file offerings using the table (with proper formatting)
 
 - on any one of the client terminals, after `client3` has also offered `jjs.jpg`
 
@@ -334,7 +333,7 @@ jjs.jpg   client3  127.0.0.1   1033
 wee.txt   heyy     127.0.0.1   1030
 ```
 
-#### test 2: Appropriate message is displayed when no files are being offered
+#### Appropriate message is displayed when no files are being offered
 
 - scenario: 1 client 1 server, client `list`s right after a successful registration
 
@@ -344,7 +343,7 @@ wee.txt   heyy     127.0.0.1   1030
 >>> [No files available for download at the moment.]
 ```
 
-#### test 3: file listings are updated when the client table is updated (i.e. new files are being offered)
+#### file listings are updated when the client table is updated (i.e. new files are being offered)
 
 - client 1 offers three files and lists them
     - note that the prompt messages get messed up slightly when the client threads are both waiting for user input and receiving updates from the server’s broadcasts.
@@ -451,9 +450,9 @@ To request a file, the client will first use its table to figure out who the fil
 
 File transfers are done directly between clients. Appropriate status messages are printed throughout the transfer process.
 
-### File Transfer Tests
+### File Transfer Scenarios
 
-#### test 1: Client can successfully request and receive a file offered by another client. The received file content should be exactly the same as that of the offered file of the host.
+#### Client can successfully request and receive a file offered by another client. The received file content should be exactly the same as that of the offered file of the host.
 
 - from the previous session with 2 clients and a lot of files:
 - client `waa` requests `1.txt` from `heyy`
@@ -478,11 +477,11 @@ File transfers are done directly between clients. Appropriate status messages ar
 ```
 - 1.txt now appears in the working directory of FileApp.py
 
-#### test 2: Appropriate status messages should be printed at critical points of the file transfer, similar to the example provided in the specification.
+#### Appropriate status messages should be printed at critical points of the file transfer, similar to the example provided in the specification.
 
 - See above status messages
 
-#### test 3: An appropriate error message should be printed when the client tries to request a non-existent file or a file from an incorrect client
+#### An appropriate error message should be printed when the client tries to request a non-existent file or a file from an incorrect client
 
 - client `waa` requesting a non-existent file
 
@@ -498,7 +497,7 @@ File transfers are done directly between clients. Appropriate status messages ar
 < Invalid Request >
 ```
 
-## de-registration
+## De-registration
 This is a book-keeping function to keep track of active clients. When a client is about to go offline, it should stop listening for file requests from its peers. Then, it must announce to the server that it is going offline
 
 - a successful de-registration sequence:
@@ -507,8 +506,8 @@ This is a book-keeping function to keep track of active clients. When a client i
 - The client has to wait for an ack from the server within 500 msecs. The client should retry for 2 times and terminate if it fails all three times.
 - The client program will not terminate after a successful de-registration.
 
-### de-registration tests
-#### test 1: dereg command de-registers the client without exiting the client program.
+### De-registration scenarios
+#### dereg command de-registers the client without exiting the client program.
 
 - waa deregisters
 
@@ -518,7 +517,7 @@ This is a book-keeping function to keep track of active clients. When a client i
 
 ```
 
-#### test 2: When a client dereg’ed after offering file(s), the server should broadcast the updated table of offered files to other active clients. Upon receiving the broadcasted table, active clients should output appropriate status messages to indicate that its local table has been updated.
+#### When a client dereg’ed after offering file(s), the server should broadcast the updated table of offered files to other active clients. Upon receiving the broadcasted table, active clients should output appropriate status messages to indicate that its local table has been updated.
 
 - continued from above test
 - client `heyy` terminal
@@ -576,23 +575,21 @@ The server's registration table data structure is a dictionary with the followin
     }
 ```
 
-- When new clients register, `files` is initialized to an empty set
 - why do we have `(clientIP, client_udp_port)` as the key?
-    - This is basically the `clientAddress`. There are a number of reasons for using this server-side data structure:
+    - `(clientIP, client_udp_port)` is the `clientAddress`. There are a number of beneficial scenarios:
     1. Checking whether a given clientAddress is active (during broadcasts) is efficient
-        - *`self*.table[*client_address*]["status"] == "active"`
+        - `self.table[*client_address*]["status"] == "active"`
     2. Because the server is always listening to incoming client requests, it needs to frequently differentiate between different types of requests: registrations, offers, and deregistrations. 
-        - Checking for if the clientAddress exists in the dictionary keys is semantically equivalent to checking for whether the client has already registered. Note that we do not support `rereg`.
-        - An alternative approach to distinguishing between different types of requests is to include the type of request in the message itself
-            - e.g. This is also implemented in the code. If the client has already registered, the request is either a `dereg` or a file `offer`, from which we can differentiate from the message itself. See the `dereg` section.
+        - Checking for if the clientAddress exists in the dictionary keys is semantically equivalent to checking for whether the client has already registered. 
+        - If the client has already registered, the request is either a `dereg` or a file `offer`, from which we can differentiate from the message itself. 
     3. The only operation that would be sacrificed would be performing the lookup of whether a name is already taken by the client (but this doesn’t happen that often anyway because there aren’t that many clients that come and go).
-- why is files a set?
-    - Per the spec, a client cannot offer two files with the same. name
-- this server table is updated when:
-    - A client deregisters
-        - files becomes empty, status becomes offline
-    - a client offers another file
-        - file is added to `files` , the client view is updated
+- Files is a set because a client cannot offer two files with the same name
+
+This server table is updated when:
+- A client deregisters
+   - files becomes empty, status becomes offline
+- a client offers another file
+   - file is added to `files` , the client view is updated
 
 ### Client’s table (transformed table)
 
@@ -602,12 +599,14 @@ This is represented in `FileServer.client_table_view` and `FileClient.local_tabl
 {"file_name,client_name" : (client_ip, client_tcp_port), ...}
 ```
 
-- why this key?
-    - when requesting a file, the client needs to be able to quickly check whether that file actually belongs to that client.
-    - need a str, int, float, bool or None to send over sockets using `json` dumps and loads to serialize and deserialize the dictionary, so [we need to either use one field or concatenate multiple](https://stackoverflow.com/questions/15190362/sending-a-dictionary-using-sockets-in-python)
-    - we can’t use `file_name` to index because multiple clients can offer the same file. Also, one host can have multiple instances of chatapp clients that offer the same file, so we can’t index by `file_name,client_ip`. `file_name,client_name` guarantees us a unique key and the leftover values conveniently makes up the address where the client can request the file from the client.
-- the udp ports are not included in this view because they are only for server-client communication.
-- An alternative approach could be to call some sort of transformation algorithm to transform the server table to the client view every time it needs to be broadcasted.  However, because server updates are likely common, we just choose to store extra state and maintain both views as we go.
+why this key?
+- when requesting a file, the client needs to be able to quickly check whether that file actually belongs to that client.
+- practical: for serialization and deserialization of the dictionary. [We need to either use one key field or concatenate multiple](https://stackoverflow.com/questions/15190362/sending-a-dictionary-using-sockets-in-python)
+- we can’t use `file_name` to index because multiple clients can offer the same file. Also, one host can have multiple instances of chatapp clients that offer the same file, so we can’t index by `file_name,client_ip`. `file_name,client_name` guarantees us a unique key and the leftover values conveniently makes up the address where the client can request the file from the client.
+
+The udp ports are not included in this view because they are only for server-client communication.
+
+An alternative approach could be to call some sort of transformation algorithm to transform the server table to the client view every time it needs to be broadcasted.  However, because server updates are likely common, we just choose to store extra state and maintain both views as we go.
 
 # Known Bugs 🐛
 
